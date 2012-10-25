@@ -29,16 +29,27 @@ import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 import javax.servlet.http.HttpServletResponse;
 
-import org.apache.commons.httpclient.Header;
-import org.apache.commons.httpclient.HttpClient;
-import org.apache.commons.httpclient.cookie.CookiePolicy;
-import org.apache.commons.httpclient.methods.DeleteMethod;
-import org.apache.commons.httpclient.methods.GetMethod;
-import org.apache.commons.httpclient.methods.HeadMethod;
-import org.apache.commons.httpclient.methods.InputStreamRequestEntity;
-import org.apache.commons.httpclient.methods.PostMethod;
-import org.apache.commons.httpclient.methods.PutMethod;
-import org.apache.commons.httpclient.methods.StringRequestEntity;
+import org.apache.http.Header;
+import org.apache.http.HttpEntity;
+import org.apache.http.HttpHost;
+import org.apache.http.HttpResponse;
+import org.apache.http.HttpVersion;
+import org.apache.http.client.HttpClient;
+import org.apache.http.client.methods.HttpDelete;
+import org.apache.http.client.methods.HttpGet;
+import org.apache.http.client.methods.HttpHead;
+import org.apache.http.client.methods.HttpPost;
+import org.apache.http.client.methods.HttpPut;
+import org.apache.http.conn.params.ConnRoutePNames;
+import org.apache.http.entity.ContentType;
+import org.apache.http.entity.InputStreamEntity;
+import org.apache.http.entity.StringEntity;
+import org.apache.http.impl.client.DefaultHttpClient;
+import org.apache.http.params.BasicHttpParams;
+import org.apache.http.params.HttpParams;
+import org.apache.http.params.HttpProtocolParams;
+import org.apache.http.protocol.HTTP;
+import org.apache.http.util.EntityUtils;
 import org.apache.log4j.Logger;
 import org.dasein.cloud.CloudErrorType;
 import org.dasein.cloud.CloudException;
@@ -64,12 +75,12 @@ public abstract class AbstractMethod {
         try {
             ProviderContext ctx = provider.getContext();
             HttpClient client = getClient();
-            GetMethod get = new GetMethod(provider.getEndpoint());
+            HttpGet get = new HttpGet(provider.getEndpoint());
             
             try {
-                get.addRequestHeader("Content-Type", "application/json");
-                get.addRequestHeader("X-Auth-User", new String(ctx.getAccessPublic(), "utf-8"));
-                get.addRequestHeader("X-Auth-Key", new String(ctx.getAccessPrivate(), "utf-8"));
+                get.addHeader("Content-Type", "application/json");
+                get.addHeader("X-Auth-User", new String(ctx.getAccessPublic(), "utf-8"));
+                get.addHeader("X-Auth-Key", new String(ctx.getAccessPrivate(), "utf-8"));
             }
             catch( UnsupportedEncodingException e ) {
                 std.error("authenticate(): Unsupported encoding when building request headers: " + e.getMessage());
@@ -78,65 +89,61 @@ public abstract class AbstractMethod {
                 }
                 throw new InternalException(e);
             }
-            get.getParams().setCookiePolicy(CookiePolicy.IGNORE_COOKIES);
             if( wire.isDebugEnabled() ) {
-                wire.debug("GET " + get.getPath());
-                for( Header header : get.getRequestHeaders() ) {
+                wire.debug(get.getRequestLine().toString());
+                for( Header header : get.getAllHeaders() ) {
                     wire.debug(header.getName() + ": " + header.getValue());
                 }
                 wire.debug("");
             }
-            int code;
-            
+            HttpResponse response;
+
             try {
-                code = client.executeMethod(get);
+                response = client.execute(get);
+                if( wire.isDebugEnabled() ) {
+                    wire.debug(response.getStatusLine().toString());
+                    for( Header header : response.getAllHeaders() ) {
+                        wire.debug(header.getName() + ": " + header.getValue());
+                    }
+                    wire.debug("");
+                }
             }
             catch( IOException e ) {
-                std.error("authenticate(): Failed to execute HTTP request due to a cloud I/O error: " + e.getMessage());
-                if( std.isTraceEnabled() ) {
-                    e.printStackTrace();
-                }
-                throw new CloudException(e);
+                std.error("I/O error from server communications: " + e.getMessage());
+                e.printStackTrace();
+                throw new InternalException(e);
             }
-            if( std.isDebugEnabled() ) {
-                std.debug("authenticate(): HTTP Status " + code);
-            }
-            Header[] headers = get.getResponseHeaders();
-            
-            if( wire.isDebugEnabled() ) {
-                wire.debug(get.getStatusLine().toString());
-                for( Header h : headers ) {
-                    if( h.getValue() != null ) {
-                        wire.debug(h.getName() + ": " + h.getValue().trim());
-                    }
-                    else {
-                        wire.debug(h.getName() + ":");
-                    }
-                }
-            }
+            int code = response.getStatusLine().getStatusCode();
+
+            std.debug("HTTP STATUS: " + code);
             if( code != HttpServletResponse.SC_NO_CONTENT ) {
                 if( code == HttpServletResponse.SC_FORBIDDEN || code == HttpServletResponse.SC_UNAUTHORIZED ) {
                     return null;
                 }
                 std.error("authenticate(): Expected NO CONTENT for an authentication request, got " + code);
-                String response;
-                
-                try {
-                    response = get.getResponseBodyAsString();
-                }
-                catch( IOException e ) {
-                    std.error("authenticate(): Failed to read response error due to a cloud I/O error: " + e.getMessage());
-                    if( std.isTraceEnabled() ) {
-                        e.printStackTrace();
+                HttpEntity entity = response.getEntity();
+                String json = null;
+
+                if( entity != null ) {
+                    try {
+                        json = EntityUtils.toString(entity);
+
+                        if( wire.isDebugEnabled() ) {
+                            wire.debug(json);
+                            wire.debug("");
+                        }
                     }
-                    throw new CloudException(e);                    
+                    catch( IOException e ) {
+                        throw new CloudException(e);
+                    }
                 }
-                if( wire.isDebugEnabled() ) {
-                    wire.debug(response);
+                RackspaceException.ExceptionItems items;
+                if( json == null ) {
+                    items = RackspaceException.parseException(code, "{}");
                 }
-                wire.debug("");
-                RackspaceException.ExceptionItems items = RackspaceException.parseException(code, response);
-                
+                else {
+                    items = RackspaceException.parseException(code, json);
+                }
                 if( items.type.equals(CloudErrorType.AUTHENTICATION) ) {
                     return null;
                 }
@@ -146,7 +153,7 @@ public abstract class AbstractMethod {
             else {
                 AuthenticationContext authContext = new AuthenticationContext();
                 
-                for( Header h : headers ) {
+                for( Header h : response.getAllHeaders() ) {
                     if( h.getName().equalsIgnoreCase("x-auth-token") ) {
                         authContext.setAuthToken(h.getValue().trim());
                     }
@@ -194,66 +201,58 @@ public abstract class AbstractMethod {
         }
         try {
             HttpClient client = getClient();
-            DeleteMethod delete = new DeleteMethod(endpoint + resource);
+            HttpDelete delete = new HttpDelete(endpoint + resource);
             
-            delete.addRequestHeader("Content-Type", "application/json");
-            delete.addRequestHeader("X-Auth-Token", authToken);
-            delete.getParams().setCookiePolicy(CookiePolicy.IGNORE_COOKIES);
+            delete.addHeader("Content-Type", "application/json");
+            delete.addHeader("X-Auth-Token", authToken);
+
             if( wire.isDebugEnabled() ) {
-                wire.debug("DELETE " + delete.getPath());
-                for( Header header : delete.getRequestHeaders() ) {
+                wire.debug(delete.getRequestLine().toString());
+                for( Header header : delete.getAllHeaders() ) {
                     wire.debug(header.getName() + ": " + header.getValue());
                 }
                 wire.debug("");
             }
-            int code;
-            
+            HttpResponse response;
+
             try {
-                code = client.executeMethod(delete);
+                response = client.execute(delete);
+                if( wire.isDebugEnabled() ) {
+                    wire.debug(response.getStatusLine().toString());
+                    for( Header header : response.getAllHeaders() ) {
+                        wire.debug(header.getName() + ": " + header.getValue());
+                    }
+                    wire.debug("");
+                }
             }
             catch( IOException e ) {
-                std.error("delete(): Failed to execute HTTP request due to a cloud I/O error: " + e.getMessage());
-                if( std.isTraceEnabled() ) {
-                    e.printStackTrace();
-                }
-                throw new CloudException(e);
+                std.error("I/O error from server communications: " + e.getMessage());
+                e.printStackTrace();
+                throw new InternalException(e);
             }
-            if( std.isDebugEnabled() ) {
-                std.debug("delete(): HTTP Status " + code);
-            }
-            Header[] headers = delete.getResponseHeaders();
-            
-            if( wire.isDebugEnabled() ) {
-                wire.debug(delete.getStatusLine().toString());
-                for( Header h : headers ) {
-                    if( h.getValue() != null ) {
-                        wire.debug(h.getName() + ": " + h.getValue().trim());
-                    }
-                    else {
-                        wire.debug(h.getName() + ":");
-                    }
-                }
-                wire.debug("");                                
-            }
+            int code = response.getStatusLine().getStatusCode();
+
+            std.debug("HTTP STATUS: " + code);
+
             if( code != HttpServletResponse.SC_NO_CONTENT && code != HttpServletResponse.SC_ACCEPTED ) {
                 std.error("delete(): Expected NO CONTENT for DELETE request, got " + code);
-                String response;
-                
-                try {
-                    response = delete.getResponseBodyAsString();
-                }
-                catch( IOException e ) {
-                    std.error("delete(): Failed to read response error due to a cloud I/O error: " + e.getMessage());
-                    if( std.isTraceEnabled() ) {
-                        e.printStackTrace();
+                HttpEntity entity = response.getEntity();
+                String json = null;
+
+                if( entity != null ) {
+                    try {
+                        json = EntityUtils.toString(entity);
+
+                        if( wire.isDebugEnabled() ) {
+                            wire.debug(json);
+                            wire.debug("");
+                        }
                     }
-                    throw new CloudException(e);                    
+                    catch( IOException e ) {
+                        throw new CloudException(e);
+                    }
                 }
-                if( wire.isDebugEnabled() ) {
-                    wire.debug(response);
-                }
-                wire.debug("");
-                RackspaceException.ExceptionItems items = RackspaceException.parseException(code, response);
+                RackspaceException.ExceptionItems items = (json == null ? null : RackspaceException.parseException(code, json));
                 
                 if( items == null ) {
                     items = new RackspaceException.ExceptionItems();
@@ -293,69 +292,62 @@ public abstract class AbstractMethod {
         }
         try {
             HttpClient client = getClient();
-            GetMethod get = new GetMethod(endpoint + resource);
+            HttpGet get = new HttpGet(endpoint + resource);
             
-            get.addRequestHeader("Content-Type", "application/json");
-            get.addRequestHeader("X-Auth-Token", authToken);
-            get.getParams().setCookiePolicy(CookiePolicy.IGNORE_COOKIES);
+            get.addHeader("Content-Type", "application/json");
+            get.addHeader("X-Auth-Token", authToken);
+
             if( wire.isDebugEnabled() ) {
-                wire.debug("GET " + get.getPath());
-                for( Header header : get.getRequestHeaders() ) {
+                wire.debug(get.getRequestLine().toString());
+                for( Header header : get.getAllHeaders() ) {
                     wire.debug(header.getName() + ": " + header.getValue());
                 }
                 wire.debug("");
             }
-            int code;
-            
+            HttpResponse response;
+
             try {
-                code = client.executeMethod(get);
+                response = client.execute(get);
+                if( wire.isDebugEnabled() ) {
+                    wire.debug(response.getStatusLine().toString());
+                    for( Header header : response.getAllHeaders() ) {
+                        wire.debug(header.getName() + ": " + header.getValue());
+                    }
+                    wire.debug("");
+                }
             }
             catch( IOException e ) {
-                std.error("getString(): Failed to execute HTTP request due to a cloud I/O error: " + e.getMessage());
-                if( std.isTraceEnabled() ) {
-                    e.printStackTrace();
-                }
-                throw new CloudException(e);
+                std.error("I/O error from server communications: " + e.getMessage());
+                e.printStackTrace();
+                throw new InternalException(e);
             }
-            if( std.isDebugEnabled() ) {
-                std.debug("getString(): HTTP Status " + code);
-            }
-            Header[] headers = get.getResponseHeaders();
-            
-            if( wire.isDebugEnabled() ) {
-                wire.debug(get.getStatusLine().toString());
-                for( Header h : headers ) {
-                    if( h.getValue() != null ) {
-                        wire.debug(h.getName() + ": " + h.getValue().trim());
-                    }
-                    else {
-                        wire.debug(h.getName() + ":");
-                    }
-                }
-                wire.debug("");                
-            }
+            int code = response.getStatusLine().getStatusCode();
+
+            std.debug("HTTP STATUS: " + code);
+
             if( code == HttpServletResponse.SC_NOT_FOUND ) {
                 return null;
             }
             if( code != HttpServletResponse.SC_NO_CONTENT && code != HttpServletResponse.SC_OK && code != HttpServletResponse.SC_NON_AUTHORITATIVE_INFORMATION ) {
                 std.error("getString(): Expected OK for GET request, got " + code);
-                String response;
-                
-                try {
-                    response = get.getResponseBodyAsString();
-                }
-                catch( IOException e ) {
-                    std.error("getString(): Failed to read response error due to a cloud I/O error: " + e.getMessage());
-                    if( std.isTraceEnabled() ) {
-                        e.printStackTrace();
+                HttpEntity entity = response.getEntity();
+                String json = null;
+
+                if( entity != null ) {
+                    try {
+                        json = EntityUtils.toString(entity);
+
+                        if( wire.isDebugEnabled() ) {
+                            wire.debug(json);
+                            wire.debug("");
+                        }
                     }
-                    throw new CloudException(e);                    
+                    catch( IOException e ) {
+                        throw new CloudException(e);
+                    }
                 }
-                if( wire.isDebugEnabled() ) {
-                    wire.debug(response);
-                }
-                wire.debug("");
-                RackspaceException.ExceptionItems items = RackspaceException.parseException(code, response);
+
+                RackspaceException.ExceptionItems items = (json == null ? null : RackspaceException.parseException(code, json));
                 
                 if( items == null ) {
                     return null;
@@ -364,23 +356,23 @@ public abstract class AbstractMethod {
                 throw new RackspaceException(items);
             }
             else {
-                String response;
-                
-                try {
-                    response = get.getResponseBodyAsString();
-                }
-                catch( IOException e ) {
-                    std.error("getString(): Failed to read response error due to a cloud I/O error: " + e.getMessage());
-                    if( std.isTraceEnabled() ) {
-                        e.printStackTrace();
+                HttpEntity entity = response.getEntity();
+                String json = null;
+
+                if( entity != null ) {
+                    try {
+                        json = EntityUtils.toString(entity);
+
+                        if( wire.isDebugEnabled() ) {
+                            wire.debug(json);
+                            wire.debug("");
+                        }
                     }
-                    throw new CloudException(e);                    
+                    catch( IOException e ) {
+                        throw new CloudException(e);
+                    }
                 }
-                if( wire.isDebugEnabled() ) {
-                    wire.debug(response);
-                }
-                wire.debug("");
-                return response;
+                return json;
             }
         }
         finally {
@@ -407,69 +399,61 @@ public abstract class AbstractMethod {
         }
         try {
             HttpClient client = getClient();
-            GetMethod get = new GetMethod(endpoint + resource);
+            HttpGet get = new HttpGet(endpoint + resource);
             
-            get.addRequestHeader("Content-Type", "application/json");
-            get.addRequestHeader("X-Auth-Token", authToken);
-            get.getParams().setCookiePolicy(CookiePolicy.IGNORE_COOKIES);
+            get.addHeader("Content-Type", "application/json");
+            get.addHeader("X-Auth-Token", authToken);
+
             if( wire.isDebugEnabled() ) {
-                wire.debug("GET " + get.getPath());
-                for( Header header : get.getRequestHeaders() ) {
+                wire.debug(get.getRequestLine().toString());
+                for( Header header : get.getAllHeaders() ) {
                     wire.debug(header.getName() + ": " + header.getValue());
                 }
                 wire.debug("");
             }
-            int code;
-            
+            HttpResponse response;
+
             try {
-                code = client.executeMethod(get);
+                response = client.execute(get);
+                if( wire.isDebugEnabled() ) {
+                    wire.debug(response.getStatusLine().toString());
+                    for( Header header : response.getAllHeaders() ) {
+                        wire.debug(header.getName() + ": " + header.getValue());
+                    }
+                    wire.debug("");
+                }
             }
             catch( IOException e ) {
-                std.error("getStream(): Failed to execute HTTP request due to a cloud I/O error: " + e.getMessage());
-                if( std.isTraceEnabled() ) {
-                    e.printStackTrace();
-                }
-                throw new CloudException(e);
+                std.error("I/O error from server communications: " + e.getMessage());
+                e.printStackTrace();
+                throw new InternalException(e);
             }
-            if( std.isDebugEnabled() ) {
-                std.debug("getStream(): HTTP Status " + code);
-            }
-            Header[] headers = get.getResponseHeaders();
-            
-            if( wire.isDebugEnabled() ) {
-                wire.debug(get.getStatusLine().toString());
-                for( Header h : headers ) {
-                    if( h.getValue() != null ) {
-                        wire.debug(h.getName() + ": " + h.getValue().trim());
-                    }
-                    else {
-                        wire.debug(h.getName() + ":");
-                    }
-                }
-                wire.debug("");                
-            }
+            int code = response.getStatusLine().getStatusCode();
+
+            std.debug("HTTP STATUS: " + code);
+
             if( code == HttpServletResponse.SC_NOT_FOUND ) {
                 return null;
             }
             if( code != HttpServletResponse.SC_OK && code != HttpServletResponse.SC_NON_AUTHORITATIVE_INFORMATION ) {
                 std.error("getStream(): Expected OK for GET request, got " + code);
-                String response;
-                
-                try {
-                    response = get.getResponseBodyAsString();
-                }
-                catch( IOException e ) {
-                    std.error("getStream(): Failed to read response error due to a cloud I/O error: " + e.getMessage());
-                    if( std.isTraceEnabled() ) {
-                        e.printStackTrace();
+                HttpEntity entity = response.getEntity();
+                String json = null;
+
+                if( entity != null ) {
+                    try {
+                        json = EntityUtils.toString(entity);
+
+                        if( wire.isDebugEnabled() ) {
+                            wire.debug(json);
+                            wire.debug("");
+                        }
                     }
-                    throw new CloudException(e);                    
+                    catch( IOException e ) {
+                        throw new CloudException(e);
+                    }
                 }
-                if( wire.isDebugEnabled() ) {
-                    wire.debug(response);
-                }
-                wire.debug("");
-                RackspaceException.ExceptionItems items = RackspaceException.parseException(code, response);
+                RackspaceException.ExceptionItems items = (json == null ? null : RackspaceException.parseException(code, json));
                 
                 if( items == null ) {
                     return null;
@@ -478,22 +462,27 @@ public abstract class AbstractMethod {
                 throw new RackspaceException(items);
             }
             else {
+                HttpEntity entity = response.getEntity();
+
+                if( entity == null ) {
+                    return null;
+                }
                 InputStream input;
-                
+
                 try {
-                    input = get.getResponseBodyAsStream();
+                    input = entity.getContent();
                 }
                 catch( IOException e ) {
-                    std.error("getStream(): Failed to read response error due to a cloud I/O error: " + e.getMessage());
+                    std.error("get(): Failed to read response error due to a cloud I/O error: " + e.getMessage());
                     if( std.isTraceEnabled() ) {
                         e.printStackTrace();
                     }
-                    throw new CloudException(e);                    
+                    throw new CloudException(e);
                 }
                 if( wire.isDebugEnabled() ) {
                     wire.debug("---> Binary Data <---");
+                    wire.debug("");
                 }
-                wire.debug("");
                 return input;
             }
         }
@@ -508,28 +497,37 @@ public abstract class AbstractMethod {
         }
     }
 
-    protected @Nonnull HttpClient getClient() {
+    private @Nonnull HttpClient getClient() throws CloudException {
         ProviderContext ctx = provider.getContext();
-        HttpClient client = new HttpClient();
 
-        if( ctx != null ) {
-            Properties p = ctx.getCustomProperties();
+        if( ctx == null ) {
+            throw new CloudException("No context was provided for this request");
+        }
+        String endpoint = ctx.getEndpoint();
+        boolean ssl = (endpoint != null && endpoint.startsWith("https"));
+        HttpParams params = new BasicHttpParams();
 
-            if( p != null ) {
-                String proxyHost = p.getProperty("proxyHost");
-                String proxyPort = p.getProperty("proxyPort");
+        HttpProtocolParams.setVersion(params, HttpVersion.HTTP_1_1);
+        //noinspection deprecation
+        HttpProtocolParams.setContentCharset(params, HTTP.UTF_8);
+        HttpProtocolParams.setUserAgent(params, "Dasein Cloud");
 
-                if( proxyHost != null ) {
-                    int port = 0;
+        Properties p = ctx.getCustomProperties();
 
-                    if( proxyPort != null && proxyPort.length() > 0 ) {
-                        port = Integer.parseInt(proxyPort);
-                    }
-                    client.getHostConfiguration().setProxy(proxyHost, port);
+        if( p != null ) {
+            String proxyHost = p.getProperty("proxyHost");
+            String proxyPort = p.getProperty("proxyPort");
+
+            if( proxyHost != null ) {
+                int port = 0;
+
+                if( proxyPort != null && proxyPort.length() > 0 ) {
+                    port = Integer.parseInt(proxyPort);
                 }
+                params.setParameter(ConnRoutePNames.DEFAULT_PROXY, new HttpHost(proxyHost, port, ssl ? "https" : "http"));
             }
         }
-        return client;
+        return new DefaultHttpClient(params);
     }
     
     protected @Nullable Map<String,String> head(@Nonnull String authToken, @Nonnull String endpoint, @Nonnull String resource) throws CloudException, InternalException {
@@ -545,68 +543,61 @@ public abstract class AbstractMethod {
         }
         try {
             HttpClient client = getClient();
-            HeadMethod head = new HeadMethod(endpoint + resource);
+            HttpHead head = new HttpHead(endpoint + resource);
             
-            head.addRequestHeader("X-Auth-Token", authToken);
-            head.getParams().setCookiePolicy(CookiePolicy.IGNORE_COOKIES);
+            head.addHeader("X-Auth-Token", authToken);
+
             if( wire.isDebugEnabled() ) {
-                wire.debug("HEAD " + head.getPath());
-                for( Header header : head.getRequestHeaders() ) {
+                wire.debug(head.getRequestLine().toString());
+                for( Header header : head.getAllHeaders() ) {
                     wire.debug(header.getName() + ": " + header.getValue());
                 }
                 wire.debug("");
             }
-            int code;
-            
+            HttpResponse response;
+
             try {
-                code = client.executeMethod(head);
+                response = client.execute(head);
+                if( wire.isDebugEnabled() ) {
+                    wire.debug(response.getStatusLine().toString());
+                    for( Header header : response.getAllHeaders() ) {
+                        wire.debug(header.getName() + ": " + header.getValue());
+                    }
+                    wire.debug("");
+                }
             }
             catch( IOException e ) {
-                std.error("head(): Failed to execute HTTP request due to a cloud I/O error: " + e.getMessage());
-                if( std.isTraceEnabled() ) {
-                    e.printStackTrace();
-                }
-                throw new CloudException(e);
+                std.error("I/O error from server communications: " + e.getMessage());
+                e.printStackTrace();
+                throw new InternalException(e);
             }
-            if( std.isDebugEnabled() ) {
-                std.debug("head(): HTTP Status " + code);
-            }
-            Header[] headers = head.getResponseHeaders();
-            
-            if( wire.isDebugEnabled() ) {
-                wire.debug(head.getStatusLine().toString());
-                for( Header h : headers ) {
-                    if( h.getValue() != null ) {
-                        wire.debug(h.getName() + ": " + h.getValue().trim());
-                    }
-                    else {
-                        wire.debug(h.getName() + ":");
-                    }
-                }
-                wire.debug("");                                
-            }
+            int code = response.getStatusLine().getStatusCode();
+
+            std.debug("HTTP STATUS: " + code);
+
+
             if( code != HttpServletResponse.SC_NO_CONTENT && code != HttpServletResponse.SC_OK ) {
                 if( code == HttpServletResponse.SC_NOT_FOUND ) {
                     return null;
                 }
                 std.error("head(): Expected NO CONTENT or OK for HEAD request, got " + code);
-                String response;
-                
-                try {
-                    response = head.getResponseBodyAsString();
-                }
-                catch( IOException e ) {
-                    std.error("head(): Failed to read response error due to a cloud I/O error: " + e.getMessage());
-                    if( std.isTraceEnabled() ) {
-                        e.printStackTrace();
+                HttpEntity entity = response.getEntity();
+                String json = null;
+
+                if( entity != null ) {
+                    try {
+                        json = EntityUtils.toString(entity);
+
+                        if( wire.isDebugEnabled() ) {
+                            wire.debug(json);
+                            wire.debug("");
+                        }
                     }
-                    throw new CloudException(e);                    
+                    catch( IOException e ) {
+                        throw new CloudException(e);
+                    }
                 }
-                if( wire.isDebugEnabled() ) {
-                    wire.debug(response);
-                }
-                wire.debug("");
-                RackspaceException.ExceptionItems items = RackspaceException.parseException(code, response);
+                RackspaceException.ExceptionItems items = (json == null ? null : RackspaceException.parseException(code, json));
                 
                 if( items == null ) {
                     return null;
@@ -616,7 +607,7 @@ public abstract class AbstractMethod {
             }
             HashMap<String,String> map = new HashMap<String,String>();
             
-            for( Header h : headers ) {
+            for( Header h : response.getAllHeaders() ) {
                 map.put(h.getName().trim(), h.getValue().trim());
             }
             return map;
@@ -646,74 +637,65 @@ public abstract class AbstractMethod {
         }
         try {
             HttpClient client = getClient();
-            PostMethod post = new PostMethod(endpoint + resource);
+            HttpPost post = new HttpPost(endpoint + resource);
             
-            post.addRequestHeader("Content-Type", "application/json");
-            post.addRequestHeader("X-Auth-Token", authToken);
+            post.addHeader("Content-Type", "application/json");
+            post.addHeader("X-Auth-Token", authToken);
             if( customHeaders != null ) {
                 for( Map.Entry<String, String> entry : customHeaders.entrySet() ) {
                     String val = (entry.getValue() == null ? "" : entry.getValue());
                     
-                    post.addRequestHeader(entry.getKey(), val);
+                    post.addHeader(entry.getKey(), val);
                 }
             }
-            post.getParams().setCookiePolicy(CookiePolicy.IGNORE_COOKIES);
+
             if( wire.isDebugEnabled() ) {
-                wire.debug("POST " + post.getPath());
-                for( Header header : post.getRequestHeaders() ) {
+                wire.debug(post.getRequestLine().toString());
+                for( Header header : post.getAllHeaders() ) {
                     wire.debug(header.getName() + ": " + header.getValue());
                 }
                 wire.debug("");
-                
             }
-            int code;
-            
+            HttpResponse response;
+
             try {
-                code = client.executeMethod(post);
-            }
-            catch( IOException e ) {
-                std.error("postString(): Failed to execute HTTP request due to a cloud I/O error: " + e.getMessage());
-                if( std.isTraceEnabled() ) {
-                    e.printStackTrace();
-                }
-                throw new CloudException(e);
-            }
-            if( std.isDebugEnabled() ) {
-                std.debug("postString(): HTTP Status " + code);
-            }
-            Header[] headers = post.getResponseHeaders();
-            
-            if( wire.isDebugEnabled() ) {
-                wire.debug(post.getStatusLine().toString());
-                for( Header h : headers ) {
-                    if( h.getValue() != null ) {
-                        wire.debug(h.getName() + ": " + h.getValue().trim());
-                    }
-                    else {
-                        wire.debug(h.getName() + ":");
-                    }
-                }
-                wire.debug("");
-            }
-            if( code != HttpServletResponse.SC_ACCEPTED && code != HttpServletResponse.SC_NO_CONTENT ) {
-                std.error("postString(): Expected ACCEPTED for POST request, got " + code);
-                String response;
-                
-                try {
-                    response = post.getResponseBodyAsString();
-                }
-                catch( IOException e ) {
-                    std.error("postString(): Failed to read response error due to a cloud I/O error: " + e.getMessage());
-                    if( std.isTraceEnabled() ) {
-                        e.printStackTrace();
-                    }
-                    throw new CloudException(e);                    
-                }
+                response = client.execute(post);
                 if( wire.isDebugEnabled() ) {
-                    wire.debug(response);
+                    wire.debug(response.getStatusLine().toString());
+                    for( Header header : response.getAllHeaders() ) {
+                        wire.debug(header.getName() + ": " + header.getValue());
+                    }
                     wire.debug("");
                 }
-                RackspaceException.ExceptionItems items = RackspaceException.parseException(code, response);
+            }
+            catch( IOException e ) {
+                std.error("I/O error from server communications: " + e.getMessage());
+                e.printStackTrace();
+                throw new InternalException(e);
+            }
+            int code = response.getStatusLine().getStatusCode();
+
+            std.debug("HTTP STATUS: " + code);
+
+            if( code != HttpServletResponse.SC_ACCEPTED && code != HttpServletResponse.SC_NO_CONTENT ) {
+                std.error("postString(): Expected ACCEPTED for POST request, got " + code);
+                HttpEntity entity = response.getEntity();
+                String json = null;
+
+                if( entity != null ) {
+                    try {
+                        json = EntityUtils.toString(entity);
+
+                        if( wire.isDebugEnabled() ) {
+                            wire.debug(json);
+                            wire.debug("");
+                        }
+                    }
+                    catch( IOException e ) {
+                        throw new CloudException(e);
+                    }
+                }
+                RackspaceException.ExceptionItems items = (json == null ? null : RackspaceException.parseException(code, json));
                 
                 if( items == null ) {
                     items = new RackspaceException.ExceptionItems();
@@ -727,24 +709,24 @@ public abstract class AbstractMethod {
             }
             else {
                 if( code == HttpServletResponse.SC_ACCEPTED ) {
-                    String response;
-                    
-                    try {
-                        response = post.getResponseBodyAsString();
-                    }
-                    catch( IOException e ) {
-                        std.error("postString(): Failed to read response error due to a cloud I/O error: " + e.getMessage());
-                        if( std.isTraceEnabled() ) {
-                            e.printStackTrace();
+                    HttpEntity entity = response.getEntity();
+                    String json = null;
+
+                    if( entity != null ) {
+                        try {
+                            json = EntityUtils.toString(entity);
+
+                            if( wire.isDebugEnabled() ) {
+                                wire.debug(json);
+                                wire.debug("");
+                            }
                         }
-                        throw new CloudException(e);                    
-                    }
-                    if( response != null && !response.trim().equals("") ) {
-                        if( wire.isDebugEnabled() ) {
-                            wire.debug(response);
+                        catch( IOException e ) {
+                            throw new CloudException(e);
                         }
-                        wire.debug("");
-                        return response;
+                    }
+                    if( json != null && !json.trim().equals("") ) {
+                        return json;
                     }
                 }
                 return null;
@@ -774,82 +756,66 @@ public abstract class AbstractMethod {
         }
         try {
             HttpClient client = getClient();
-            PostMethod post = new PostMethod(endpoint + resource);
+            HttpPost post = new HttpPost(endpoint + resource);
             
-            post.addRequestHeader("Content-Type", "application/json");
-            post.addRequestHeader("X-Auth-Token", authToken);
-            post.getParams().setCookiePolicy(CookiePolicy.IGNORE_COOKIES);
+            post.addHeader("Content-Type", "application/json");
+            post.addHeader("X-Auth-Token", authToken);
+
+            if( payload != null ) {
+                post.setEntity(new StringEntity(payload, ContentType.APPLICATION_JSON));
+            }
             if( wire.isDebugEnabled() ) {
-                wire.debug("POST " + post.getPath());
-                for( Header header : post.getRequestHeaders() ) {
+                wire.debug(post.getRequestLine().toString());
+                for( Header header : post.getAllHeaders() ) {
                     wire.debug(header.getName() + ": " + header.getValue());
                 }
                 wire.debug("");
-                
-            }
-            if( payload != null ) { 
-                wire.debug(payload);
-                wire.debug("");
-                try {
-                    post.setRequestEntity(new StringRequestEntity(payload, "application/json", "utf-8"));
-                }
-                catch( UnsupportedEncodingException e ) {
-                    std.error("postString(): UTF-8 is not supported locally: " + e.getMessage());
-                    if( std.isTraceEnabled() ) {
-                        e.printStackTrace();
-                    }
-                    throw new InternalException(e);
-                }
-            }
-            int code;
-            
-            try {
-                code = client.executeMethod(post);
-            }
-            catch( IOException e ) {
-                std.error("postString(): Failed to execute HTTP request due to a cloud I/O error: " + e.getMessage());
-                if( std.isTraceEnabled() ) {
-                    e.printStackTrace();
-                }
-                throw new CloudException(e);
-            }
-            if( std.isDebugEnabled() ) {
-                std.debug("postString(): HTTP Status " + code);
-            }
-            Header[] headers = post.getResponseHeaders();
-            
-            if( wire.isDebugEnabled() ) {
-                wire.debug(post.getStatusLine().toString());
-                for( Header h : headers ) {
-                    if( h.getValue() != null ) {
-                        wire.debug(h.getName() + ": " + h.getValue().trim());
-                    }
-                    else {
-                        wire.debug(h.getName() + ":");
-                    }
-                }
-                wire.debug("");
-            }
-            if( code != HttpServletResponse.SC_ACCEPTED && code != HttpServletResponse.SC_NO_CONTENT ) {
-                std.error("postString(): Expected ACCEPTED for POST request, got " + code);
-                String response;
-                
-                try {
-                    response = post.getResponseBodyAsString();
-                }
-                catch( IOException e ) {
-                    std.error("postString(): Failed to read response error due to a cloud I/O error: " + e.getMessage());
-                    if( std.isTraceEnabled() ) {
-                        e.printStackTrace();
-                    }
-                    throw new CloudException(e);                    
-                }
-                if( wire.isDebugEnabled() ) {
-                    wire.debug(response);
+                if( payload != null ) {
+                    wire.debug(payload);
                     wire.debug("");
                 }
-                RackspaceException.ExceptionItems items = RackspaceException.parseException(code, response);
-                
+            }
+            HttpResponse response;
+
+            try {
+                response = client.execute(post);
+                if( wire.isDebugEnabled() ) {
+                    wire.debug(response.getStatusLine().toString());
+                    for( Header header : response.getAllHeaders() ) {
+                        wire.debug(header.getName() + ": " + header.getValue());
+                    }
+                    wire.debug("");
+                }
+            }
+            catch( IOException e ) {
+                std.error("I/O error from server communications: " + e.getMessage());
+                e.printStackTrace();
+                throw new InternalException(e);
+            }
+            int code = response.getStatusLine().getStatusCode();
+
+            std.debug("HTTP STATUS: " + code);
+
+            if( code != HttpServletResponse.SC_ACCEPTED && code != HttpServletResponse.SC_NO_CONTENT ) {
+                std.error("postString(): Expected ACCEPTED for POST request, got " + code);
+                HttpEntity entity = response.getEntity();
+                String json = null;
+
+                if( entity != null ) {
+                    try {
+                        json = EntityUtils.toString(entity);
+
+                        if( wire.isDebugEnabled() ) {
+                            wire.debug(json);
+                            wire.debug("");
+                        }
+                    }
+                    catch( IOException e ) {
+                        throw new CloudException(e);
+                    }
+                }
+                RackspaceException.ExceptionItems items = (json == null ? null : RackspaceException.parseException(code, json));
+
                 if( items == null ) {
                     items = new RackspaceException.ExceptionItems();
                     items.code = 404;
@@ -862,24 +828,24 @@ public abstract class AbstractMethod {
             }
             else {
                 if( code == HttpServletResponse.SC_ACCEPTED ) {
-                    String response;
-                    
-                    try {
-                        response = post.getResponseBodyAsString();
-                    }
-                    catch( IOException e ) {
-                        std.error("postString(): Failed to read response error due to a cloud I/O error: " + e.getMessage());
-                        if( std.isTraceEnabled() ) {
-                            e.printStackTrace();
+                    HttpEntity entity = response.getEntity();
+                    String json = null;
+
+                    if( entity != null ) {
+                        try {
+                            json = EntityUtils.toString(entity);
+
+                            if( wire.isDebugEnabled() ) {
+                                wire.debug(json);
+                                wire.debug("");
+                            }
                         }
-                        throw new CloudException(e);                    
-                    }
-                    if( response != null && !response.trim().equals("") ) {
-                        if( wire.isDebugEnabled() ) {
-                            wire.debug(response);
+                        catch( IOException e ) {
+                            throw new CloudException(e);
                         }
-                        wire.debug("");
-                        return response;
+                    }
+                    if( json != null && !json.trim().equals("") ) {
+                        return json;
                     }
                 }
                 return null;
@@ -910,54 +876,45 @@ public abstract class AbstractMethod {
         }
         try {
             HttpClient client = getClient();
-            PostMethod post = new PostMethod(endpoint + resource);
+            HttpPost post = new HttpPost(endpoint + resource);
             
-            post.addRequestHeader("Content-Type", "application/octet-stream");
-            post.addRequestHeader("X-Auth-Token", authToken);
-            post.getParams().setCookiePolicy(CookiePolicy.IGNORE_COOKIES);
+            post.addHeader("Content-Type", "application/octet-stream");
+            post.addHeader("X-Auth-Token", authToken);
+
+            post.setEntity(new InputStreamEntity(stream, -1, ContentType.APPLICATION_OCTET_STREAM));
+
             if( wire.isDebugEnabled() ) {
-                wire.debug("POST " + post.getPath());
-                for( Header header : post.getRequestHeaders() ) {
+                wire.debug(post.getRequestLine().toString());
+                for( Header header : post.getAllHeaders() ) {
                     wire.debug(header.getName() + ": " + header.getValue());
                 }
                 wire.debug("");
-                
+                wire.debug("--> BINARY DATA <--");
             }
-            wire.debug("---> BINARY DATA <---");
-            wire.debug("");
-            post.setRequestEntity(new InputStreamRequestEntity(stream, "application/octet-stream"));
-            int code;
-            
+            HttpResponse response;
+
             try {
-                code = client.executeMethod(post);
+                response = client.execute(post);
+                if( wire.isDebugEnabled() ) {
+                    wire.debug(response.getStatusLine().toString());
+                    for( Header header : response.getAllHeaders() ) {
+                        wire.debug(header.getName() + ": " + header.getValue());
+                    }
+                    wire.debug("");
+                }
             }
             catch( IOException e ) {
-                std.error("postStream(): Failed to execute HTTP request due to a cloud I/O error: " + e.getMessage());
-                if( std.isTraceEnabled() ) {
-                    e.printStackTrace();
-                }
-                throw new CloudException(e);
+                std.error("I/O error from server communications: " + e.getMessage());
+                e.printStackTrace();
+                throw new InternalException(e);
             }
-            if( std.isDebugEnabled() ) {
-                std.debug("postStream(): HTTP Status " + code);
-            }
-            Header[] headers = post.getResponseHeaders();
-            
-            if( wire.isDebugEnabled() ) {
-                wire.debug(post.getStatusLine().toString());
-                for( Header h : headers ) {
-                    if( h.getValue() != null ) {
-                        wire.debug(h.getName() + ": " + h.getValue().trim());
-                    }
-                    else {
-                        wire.debug(h.getName() + ":");
-                    }
-                }
-                wire.debug("");
-            }
+            int code = response.getStatusLine().getStatusCode();
+
+            std.debug("HTTP STATUS: " + code);
+
             String responseHash = null;
             
-            for( Header h : post.getResponseHeaders() ) {
+            for( Header h : response.getAllHeaders() ) {
                 if( h.getName().equals("ETag") ) {
                     responseHash = h.getValue(); 
                 }
@@ -967,24 +924,24 @@ public abstract class AbstractMethod {
             }
             if( code != HttpServletResponse.SC_ACCEPTED && code != HttpServletResponse.SC_NO_CONTENT ) {
                 std.error("postStream(): Expected ACCEPTED or NO CONTENT for POST request, got " + code);
-                String response;
-                
-                try {
-                    response = post.getResponseBodyAsString();
-                }
-                catch( IOException e ) {
-                    std.error("postStream(): Failed to read response error due to a cloud I/O error: " + e.getMessage());
-                    if( std.isTraceEnabled() ) {
-                        e.printStackTrace();
+                HttpEntity entity = response.getEntity();
+                String json = null;
+
+                if( entity != null ) {
+                    try {
+                        json = EntityUtils.toString(entity);
+
+                        if( wire.isDebugEnabled() ) {
+                            wire.debug(json);
+                            wire.debug("");
+                        }
                     }
-                    throw new CloudException(e);                    
+                    catch( IOException e ) {
+                        throw new CloudException(e);
+                    }
                 }
-                if( wire.isDebugEnabled() ) {
-                    wire.debug(response);
-                }
-                wire.debug("");
-                RackspaceException.ExceptionItems items = RackspaceException.parseException(code, response);
-                
+                RackspaceException.ExceptionItems items = (json == null ? null : RackspaceException.parseException(code, json));
+
                 if( items == null ) {
                     items = new RackspaceException.ExceptionItems();
                     items.code = 404;
@@ -998,24 +955,24 @@ public abstract class AbstractMethod {
             else {
                 wire.debug("");
                 if( code == HttpServletResponse.SC_ACCEPTED ) {
-                    String response;
-                    
-                    try {
-                        response = post.getResponseBodyAsString();
-                    }
-                    catch( IOException e ) {
-                        std.error("postStream(): Failed to read response error due to a cloud I/O error: " + e.getMessage());
-                        if( std.isTraceEnabled() ) {
-                            e.printStackTrace();
+                    HttpEntity entity = response.getEntity();
+                    String json = null;
+
+                    if( entity != null ) {
+                        try {
+                            json = EntityUtils.toString(entity);
+
+                            if( wire.isDebugEnabled() ) {
+                                wire.debug(json);
+                                wire.debug("");
+                            }
                         }
-                        throw new CloudException(e);                    
-                    }
-                    if( response != null && !response.trim().equals("") ) {
-                        if( wire.isDebugEnabled() ) {
-                            wire.debug(response);
+                        catch( IOException e ) {
+                            throw new CloudException(e);
                         }
-                        wire.debug("");
-                        return response;
+                    }
+                    if( json != null && !json.trim().equals("") ) {
+                        return json;
                     }
                 }
                 return null;
@@ -1045,74 +1002,66 @@ public abstract class AbstractMethod {
         }
         try {
             HttpClient client = getClient();
-            PutMethod put = new PutMethod(endpoint + resource);
+            HttpPut put = new HttpPut(endpoint + resource);
             
-            put.addRequestHeader("Content-Type", "application/json");
-            put.addRequestHeader("X-Auth-Token", authToken);
+            put.addHeader("Content-Type", "application/json");
+            put.addHeader("X-Auth-Token", authToken);
             if( customHeaders != null ) {
                 for( Map.Entry<String, String> entry : customHeaders.entrySet() ) {
                     String val = (entry.getValue() == null ? "" : entry.getValue());
                     
-                    put.addRequestHeader(entry.getKey(), val);
+                    put.addHeader(entry.getKey(), val);
                 }
             }
-            put.getParams().setCookiePolicy(CookiePolicy.IGNORE_COOKIES);
+
             if( wire.isDebugEnabled() ) {
-                wire.debug("PUT " + put.getPath());
-                for( Header header : put.getRequestHeaders() ) {
+                wire.debug(put.getRequestLine().toString());
+                for( Header header : put.getAllHeaders() ) {
                     wire.debug(header.getName() + ": " + header.getValue());
                 }
                 wire.debug("");
             }
-            int code;
-            
+            HttpResponse response;
+
             try {
-                code = client.executeMethod(put);
-            }
-            catch( IOException e ) {
-                std.error("putString(): Failed to execute HTTP request due to a cloud I/O error: " + e.getMessage());
-                if( std.isTraceEnabled() ) {
-                    e.printStackTrace();
-                }
-                throw new CloudException(e);
-            }
-            if( std.isDebugEnabled() ) {
-                std.debug("putString(): HTTP Status " + code);
-            }
-            Header[] headers = put.getResponseHeaders();
-            
-            if( wire.isDebugEnabled() ) {
-                wire.debug(put.getStatusLine().toString());
-                for( Header h : headers ) {
-                    if( h.getValue() != null ) {
-                        wire.debug(h.getName() + ": " + h.getValue().trim());
-                    }
-                    else {
-                        wire.debug(h.getName() + ":");
-                    }
-                }
-                wire.debug("");
-            }
-            if( code != HttpServletResponse.SC_CREATED && code != HttpServletResponse.SC_ACCEPTED && code != HttpServletResponse.SC_NO_CONTENT ) {
-                std.error("putString(): Expected CREATED, ACCEPTED, or NO CONTENT for put request, got " + code);
-                String response;
-                
-                try {
-                    response = put.getResponseBodyAsString();
-                }
-                catch( IOException e ) {
-                    std.error("putString(): Failed to read response error due to a cloud I/O error: " + e.getMessage());
-                    if( std.isTraceEnabled() ) {
-                        e.printStackTrace();
-                    }
-                    throw new CloudException(e);                    
-                }
+                response = client.execute(put);
                 if( wire.isDebugEnabled() ) {
-                    wire.debug(response);
+                    wire.debug(response.getStatusLine().toString());
+                    for( Header header : response.getAllHeaders() ) {
+                        wire.debug(header.getName() + ": " + header.getValue());
+                    }
                     wire.debug("");
                 }
-                RackspaceException.ExceptionItems items = RackspaceException.parseException(code, response);
-                
+            }
+            catch( IOException e ) {
+                std.error("I/O error from server communications: " + e.getMessage());
+                e.printStackTrace();
+                throw new InternalException(e);
+            }
+            int code = response.getStatusLine().getStatusCode();
+
+            std.debug("HTTP STATUS: " + code);
+
+            if( code != HttpServletResponse.SC_CREATED && code != HttpServletResponse.SC_ACCEPTED && code != HttpServletResponse.SC_NO_CONTENT ) {
+                std.error("putString(): Expected CREATED, ACCEPTED, or NO CONTENT for put request, got " + code);
+                HttpEntity entity = response.getEntity();
+                String json = null;
+
+                if( entity != null ) {
+                    try {
+                        json = EntityUtils.toString(entity);
+
+                        if( wire.isDebugEnabled() ) {
+                            wire.debug(json);
+                            wire.debug("");
+                        }
+                    }
+                    catch( IOException e ) {
+                        throw new CloudException(e);
+                    }
+                }
+                RackspaceException.ExceptionItems items = (json == null ? null : RackspaceException.parseException(code, json));
+
                 if( items == null ) {
                     items = new RackspaceException.ExceptionItems();
                     items.code = 404;
@@ -1125,24 +1074,24 @@ public abstract class AbstractMethod {
             }
             else {
                 if( code == HttpServletResponse.SC_ACCEPTED || code == HttpServletResponse.SC_CREATED ) {
-                    String response;
-                    
-                    try {
-                        response = put.getResponseBodyAsString();
-                    }
-                    catch( IOException e ) {
-                        std.error("putString(): Failed to read response error due to a cloud I/O error: " + e.getMessage());
-                        if( std.isTraceEnabled() ) {
-                            e.printStackTrace();
+                    HttpEntity entity = response.getEntity();
+                    String json = null;
+
+                    if( entity != null ) {
+                        try {
+                            json = EntityUtils.toString(entity);
+
+                            if( wire.isDebugEnabled() ) {
+                                wire.debug(json);
+                                wire.debug("");
+                            }
                         }
-                        throw new CloudException(e);                    
-                    }
-                    if( response != null && !response.trim().equals("") ) {
-                        if( wire.isDebugEnabled() ) {
-                            wire.debug(response);
-                            wire.debug("");
+                        catch( IOException e ) {
+                            throw new CloudException(e);
                         }
-                        return response;
+                    }
+                    if( json != null && !json.trim().equals("") ) {
+                        return json;
                     }
                 }
                 return null;
@@ -1172,81 +1121,66 @@ public abstract class AbstractMethod {
         }
         try {
             HttpClient client = getClient();
-            PutMethod put = new PutMethod(endpoint + resource);
+            HttpPut put = new HttpPut(endpoint + resource);
             
-            put.addRequestHeader("Content-Type", "application/json");
-            put.addRequestHeader("X-Auth-Token", authToken);
-            put.getParams().setCookiePolicy(CookiePolicy.IGNORE_COOKIES);
+            put.addHeader("Content-Type", "application/json");
+            put.addHeader("X-Auth-Token", authToken);
+
+            if( payload != null ) {
+                put.setEntity(new StringEntity(payload, ContentType.APPLICATION_JSON));
+            }
             if( wire.isDebugEnabled() ) {
-                wire.debug("PUT " + put.getPath());
-                for( Header header : put.getRequestHeaders() ) {
+                wire.debug(put.getRequestLine().toString());
+                for( Header header : put.getAllHeaders() ) {
                     wire.debug(header.getName() + ": " + header.getValue());
                 }
                 wire.debug("");
-            }
-            if( payload != null ) { 
-                wire.debug(payload);
-                wire.debug("");
-                try {
-                    put.setRequestEntity(new StringRequestEntity(payload, "application/json", "utf-8"));
-                }
-                catch( UnsupportedEncodingException e ) {
-                    std.error("putString(): UTF-8 is not supported locally: " + e.getMessage());
-                    if( std.isTraceEnabled() ) {
-                        e.printStackTrace();
-                    }
-                    throw new InternalException(e);
-                }
-            }
-            int code;
-            
-            try {
-                code = client.executeMethod(put);
-            }
-            catch( IOException e ) {
-                std.error("putString(): Failed to execute HTTP request due to a cloud I/O error: " + e.getMessage());
-                if( std.isTraceEnabled() ) {
-                    e.printStackTrace();
-                }
-                throw new CloudException(e);
-            }
-            if( std.isDebugEnabled() ) {
-                std.debug("putString(): HTTP Status " + code);
-            }
-            Header[] headers = put.getResponseHeaders();
-            
-            if( wire.isDebugEnabled() ) {
-                wire.debug(put.getStatusLine().toString());
-                for( Header h : headers ) {
-                    if( h.getValue() != null ) {
-                        wire.debug(h.getName() + ": " + h.getValue().trim());
-                    }
-                    else {
-                        wire.debug(h.getName() + ":");
-                    }
-                }
-                wire.debug("");
-            }
-            if( code != HttpServletResponse.SC_CREATED && code != HttpServletResponse.SC_ACCEPTED && code != HttpServletResponse.SC_NO_CONTENT ) {
-                std.error("putString(): Expected CREATED, ACCEPTED, or NO CONTENT for put request, got " + code);
-                String response;
-                
-                try {
-                    response = put.getResponseBodyAsString();
-                }
-                catch( IOException e ) {
-                    std.error("putString(): Failed to read response error due to a cloud I/O error: " + e.getMessage());
-                    if( std.isTraceEnabled() ) {
-                        e.printStackTrace();
-                    }
-                    throw new CloudException(e);                    
-                }
-                if( wire.isDebugEnabled() ) {
-                    wire.debug(response);
+                if( payload != null ) {
+                    wire.debug(payload);
                     wire.debug("");
                 }
-                RackspaceException.ExceptionItems items = RackspaceException.parseException(code, response);
-                
+            }
+            HttpResponse response;
+
+            try {
+                response = client.execute(put);
+                if( wire.isDebugEnabled() ) {
+                    wire.debug(response.getStatusLine().toString());
+                    for( Header header : response.getAllHeaders() ) {
+                        wire.debug(header.getName() + ": " + header.getValue());
+                    }
+                    wire.debug("");
+                }
+            }
+            catch( IOException e ) {
+                std.error("I/O error from server communications: " + e.getMessage());
+                e.printStackTrace();
+                throw new InternalException(e);
+            }
+            int code = response.getStatusLine().getStatusCode();
+
+            std.debug("HTTP STATUS: " + code);
+
+            if( code != HttpServletResponse.SC_CREATED && code != HttpServletResponse.SC_ACCEPTED && code != HttpServletResponse.SC_NO_CONTENT ) {
+                std.error("putString(): Expected CREATED, ACCEPTED, or NO CONTENT for put request, got " + code);
+                HttpEntity entity = response.getEntity();
+                String json = null;
+
+                if( entity != null ) {
+                    try {
+                        json = EntityUtils.toString(entity);
+
+                        if( wire.isDebugEnabled() ) {
+                            wire.debug(json);
+                            wire.debug("");
+                        }
+                    }
+                    catch( IOException e ) {
+                        throw new CloudException(e);
+                    }
+                }
+                RackspaceException.ExceptionItems items = (json == null ? null : RackspaceException.parseException(code, json));
+
                 if( items == null ) {
                     items = new RackspaceException.ExceptionItems();
                     items.code = 404;
@@ -1259,24 +1193,24 @@ public abstract class AbstractMethod {
             }
             else {
                 if( code == HttpServletResponse.SC_ACCEPTED || code == HttpServletResponse.SC_CREATED ) {
-                    String response;
-                    
-                    try {
-                        response = put.getResponseBodyAsString();
-                    }
-                    catch( IOException e ) {
-                        std.error("putString(): Failed to read response error due to a cloud I/O error: " + e.getMessage());
-                        if( std.isTraceEnabled() ) {
-                            e.printStackTrace();
+                    HttpEntity entity = response.getEntity();
+                    String json = null;
+
+                    if( entity != null ) {
+                        try {
+                            json = EntityUtils.toString(entity);
+
+                            if( wire.isDebugEnabled() ) {
+                                wire.debug(json);
+                                wire.debug("");
+                            }
                         }
-                        throw new CloudException(e);                    
-                    }
-                    if( response != null && !response.trim().equals("") ) {
-                        if( wire.isDebugEnabled() ) {
-                            wire.debug(response);
-                            wire.debug("");
+                        catch( IOException e ) {
+                            throw new CloudException(e);
                         }
-                        return response;
+                    }
+                    if( json != null && !json.trim().equals("") ) {
+                        return json;
                     }
                 }
                 return null;
@@ -1306,57 +1240,47 @@ public abstract class AbstractMethod {
         }
         try {
             HttpClient client = getClient();
-            PutMethod put = new PutMethod(endpoint + resource);
+            HttpPut put = new HttpPut(endpoint + resource);
             
-            put.addRequestHeader("Content-Type", "application/octet-stream");
-            put.addRequestHeader("X-Auth-Token", authToken);
+            put.addHeader("Content-Type", "application/octet-stream");
+            put.addHeader("X-Auth-Token", authToken);
             if( md5Hash != null ) {
-                put.addRequestHeader("ETag", md5Hash);
+                put.addHeader("ETag", md5Hash);
             }
-            put.getParams().setCookiePolicy(CookiePolicy.IGNORE_COOKIES);
+            put.setEntity(new InputStreamEntity(stream, -1, ContentType.APPLICATION_OCTET_STREAM));
+
             if( wire.isDebugEnabled() ) {
-                wire.debug("PUT " + put.getPath());
-                for( Header header : put.getRequestHeaders() ) {
+                wire.debug(put.getRequestLine().toString());
+                for( Header header : put.getAllHeaders() ) {
                     wire.debug(header.getName() + ": " + header.getValue());
                 }
                 wire.debug("");
-                wire.debug("---> BINARY DATA <---");
-                wire.debug("");                
+                wire.debug("--> BINARY DATA <--");
             }
+            HttpResponse response;
 
-            put.setRequestEntity(new InputStreamRequestEntity(stream, "application/octet-stream"));
-            int code;
-            
             try {
-                code = client.executeMethod(put);
+                response = client.execute(put);
+                if( wire.isDebugEnabled() ) {
+                    wire.debug(response.getStatusLine().toString());
+                    for( Header header : response.getAllHeaders() ) {
+                        wire.debug(header.getName() + ": " + header.getValue());
+                    }
+                    wire.debug("");
+                }
             }
             catch( IOException e ) {
-                std.error("putStream(): Failed to execute HTTP request due to a cloud I/O error: " + e.getMessage());
-                if( std.isTraceEnabled() ) {
-                    e.printStackTrace();
-                }
-                throw new CloudException(e);
+                std.error("I/O error from server communications: " + e.getMessage());
+                e.printStackTrace();
+                throw new InternalException(e);
             }
-            if( std.isDebugEnabled() ) {
-                std.debug("putStream(): HTTP Status " + code);
-            }
-            Header[] headers = put.getResponseHeaders();
+            int code = response.getStatusLine().getStatusCode();
 
-            if( wire.isDebugEnabled() ) {
-                wire.debug(put.getStatusLine().toString());
-                for( Header h : headers ) {
-                    if( h.getValue() != null ) {
-                        wire.debug(h.getName() + ": " + h.getValue().trim());
-                    }
-                    else {
-                        wire.debug(h.getName() + ":");
-                    }
-                }
-                wire.debug("");
-            }
+            std.debug("HTTP STATUS: " + code);
+
             String responseHash = null;
             
-            for( Header h : put.getResponseHeaders() ) {
+            for( Header h : response.getAllHeaders() ) {
                 if( h.getName().equals("ETag") ) {
                     responseHash = h.getValue(); 
                 }
@@ -1366,24 +1290,24 @@ public abstract class AbstractMethod {
             }
             if( code != HttpServletResponse.SC_CREATED && code != HttpServletResponse.SC_ACCEPTED && code != HttpServletResponse.SC_NO_CONTENT ) {
                 std.error("putStream(): Expected CREATED, ACCEPTED, or NO CONTENT for PUT request, got " + code);
-                String response;
-                
-                try {
-                    response = put.getResponseBodyAsString();
-                }
-                catch( IOException e ) {
-                    std.error("putStream(): Failed to read response error due to a cloud I/O error: " + e.getMessage());
-                    if( std.isTraceEnabled() ) {
-                        e.printStackTrace();
+                HttpEntity entity = response.getEntity();
+                String json = null;
+
+                if( entity != null ) {
+                    try {
+                        json = EntityUtils.toString(entity);
+
+                        if( wire.isDebugEnabled() ) {
+                            wire.debug(json);
+                            wire.debug("");
+                        }
                     }
-                    throw new CloudException(e);                    
+                    catch( IOException e ) {
+                        throw new CloudException(e);
+                    }
                 }
-                if( wire.isDebugEnabled() ) {
-                    wire.debug(response);
-                    wire.debug("");
-                }
-                RackspaceException.ExceptionItems items = RackspaceException.parseException(code, response);
-                
+                RackspaceException.ExceptionItems items = (json == null ? null : RackspaceException.parseException(code, json));
+
                 if( items == null ) {
                     items = new RackspaceException.ExceptionItems();
                     items.code = 404;
@@ -1396,24 +1320,24 @@ public abstract class AbstractMethod {
             }
             else {
                 if( code == HttpServletResponse.SC_ACCEPTED ) {
-                    String response;
-                    
-                    try {
-                        response = put.getResponseBodyAsString();
-                    }
-                    catch( IOException e ) {
-                        std.error("putStream(): Failed to read response error due to a cloud I/O error: " + e.getMessage());
-                        if( std.isTraceEnabled() ) {
-                            e.printStackTrace();
+                    HttpEntity entity = response.getEntity();
+                    String json = null;
+
+                    if( entity != null ) {
+                        try {
+                            json = EntityUtils.toString(entity);
+
+                            if( wire.isDebugEnabled() ) {
+                                wire.debug(json);
+                                wire.debug("");
+                            }
                         }
-                        throw new CloudException(e);                    
-                    }
-                    if( response != null && !response.trim().equals("") ) {
-                        if( wire.isDebugEnabled() ) {
-                            wire.debug(response);
-                            wire.debug("");
+                        catch( IOException e ) {
+                            throw new CloudException(e);
                         }
-                        return response;
+                    }
+                    if( json != null && !json.trim().equals("") ) {
+                        return json;
                     }
                 }
                 return null;

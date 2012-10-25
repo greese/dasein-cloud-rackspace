@@ -3,7 +3,7 @@
   
   <groupId>org.dasein</groupId>
   <artifactId>dasein-cloud-rackspace</artifactId>
-  <version>2012.06-SNAPSHOT</version>
+  <version>2012.09-SNAPSHOT</version>
   
   <name>Dasein Cloud Rackspace</name>
   <description>Native API implementation for the Rackspace API</description>
@@ -23,12 +23,12 @@
     <name>enStratus Networks Inc</name>
     <url>http://www.enstratus.com</url>
   </organization>
-  
-  <scm>
-    <connection>scm:svn:https://dasein-cloud.svn.sourceforge.net/svnroot/dasein-cloud/trunk/dasein-cloud-rackspace</connection>
-    <developerConnection>scm:svn:https://dasein-cloud.svn.sourceforge.net/svnroot/dasein-cloud/trunk/dasein-cloud-rackspace</developerConnection>
-    <url>https://dasein-cloud.svn.sourceforge.net/svnroot/dasein-cloud/trunk/dasein-cloud-rackspace</url>
-  </scm>
+
+    <scm>
+        <connection>scm:git:git://github.com/greese/dasein-cloud-rackspace.git</connection>
+        <developerConnection>scm:git:ssh://git@github.com/greese/dasein-cloud-rackspace.git</developerConnection>
+        <url>http://github.com/greese/dasein-cloud-rackspace</url>
+    </scm>
     
   <parent>
     <groupId>org.sonatype.oss</groupId>
@@ -37,37 +37,30 @@
   </parent>
           
   <dependencies>
+      <!-- Compile -->
     <dependency>
         <groupId>org.dasein</groupId>
         <artifactId>dasein-cloud-core</artifactId>
-        <version>2012.04</version>
+        <version>2012.09</version>
         <scope>compile</scope>
         <optional>false</optional>
     </dependency>   
     <dependency>
         <groupId>org.dasein</groupId>
-        <artifactId>dasein-cloud-test</artifactId>
-        <version>2012.04</version>
-        <scope>test</scope>
-        <optional>false</optional>
-    </dependency>      
-    <dependency>
-        <groupId>org.dasein</groupId>
         <artifactId>dasein-util</artifactId>
-        <version>2012.01</version>
+        <version>2012.08</version>
         <scope>compile</scope>
         <optional>false</optional>
-    </dependency>  
-    <dependency>
-      <groupId>junit</groupId>
-      <artifactId>junit</artifactId>
-      <version>4.8.2</version>
-      <scope>test</scope>
     </dependency>
+      <dependency>
+          <groupId>org.apache.httpcomponents</groupId>
+          <artifactId>httpclient</artifactId>
+          <version>4.2</version>
+      </dependency>
     <dependency>
         <groupId>log4j</groupId>
         <artifactId>log4j</artifactId>
-        <version>1.2.16</version>
+        <version>1.2.17</version>
         <scope>compile</scope>
         <optional>false</optional>
     </dependency>  
@@ -76,7 +69,22 @@
       <artifactId>json</artifactId>
       <version>20090211</version>
       <scope>compile</scope>
-    </dependency>       
+    </dependency>
+
+      <!-- Test -->
+      <dependency>
+          <groupId>org.dasein</groupId>
+          <artifactId>dasein-cloud-test</artifactId>
+          <version>2012.09.5</version>
+          <scope>test</scope>
+          <optional>false</optional>
+      </dependency>
+      <dependency>
+          <groupId>junit</groupId>
+          <artifactId>junit</artifactId>
+          <version>4.9</version>
+          <scope>test</scope>
+      </dependency>
   </dependencies>
   
   <build>
@@ -156,9 +164,6 @@
             <groupId>org.apache.maven.plugins</groupId>
             <artifactId>maven-release-plugin</artifactId>
             <version>2.1</version>
-            <configuration>
-                <tagBase>https://dasein-cloud.svn.sourceforge.net/svnroot/dasein-cloud/tags/dasein-cloud-rackspace</tagBase>
-            </configuration>
       </plugin>
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
@@ -212,7 +217,7 @@
                 </property>
             </systemProperties> 
           <includes>
-            <include>**/RackspaceTestSuite.java</include>
+            <!-- <include>**/RackspaceTestSuite.java</include> -->
           </includes>
         </configuration>
       </plugin> 

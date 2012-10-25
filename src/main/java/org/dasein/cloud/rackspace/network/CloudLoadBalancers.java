@@ -36,6 +36,7 @@ import org.dasein.cloud.InternalException;
 import org.dasein.cloud.OperationNotSupportedException;
 import org.dasein.cloud.compute.VirtualMachine;
 import org.dasein.cloud.identity.ServiceAction;
+import org.dasein.cloud.network.IPVersion;
 import org.dasein.cloud.network.LbAlgorithm;
 import org.dasein.cloud.network.LbListener;
 import org.dasein.cloud.network.LbProtocol;
@@ -418,6 +419,11 @@ public class CloudLoadBalancers implements LoadBalancerSupport {
             supportedAlgorithms = Collections.unmodifiableList(algorithms);
         }
         return supportedAlgorithms;
+    }
+
+    @Override
+    public @Nonnull Iterable<IPVersion> listSupportedIPVersions() throws CloudException, InternalException {
+        return Collections.singletonList(IPVersion.IPV4);
     }
 
     static private transient Collection<LbProtocol> supportedProtocols;
