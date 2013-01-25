@@ -3,7 +3,7 @@
   
   <groupId>org.dasein</groupId>
   <artifactId>dasein-cloud-rackspace</artifactId>
-  <version>2012.09.1-SNAPSHOT</version>
+  <version>2013.02-SNAPSHOT</version>
   
   <name>Dasein Cloud Rackspace</name>
   <description>Native API implementation for the Rackspace API</description>
@@ -41,7 +41,7 @@
     <dependency>
         <groupId>org.dasein</groupId>
         <artifactId>dasein-cloud-core</artifactId>
-        <version>2012.09</version>
+        <version>2013.02.1</version>
         <scope>compile</scope>
         <optional>false</optional>
     </dependency>   
@@ -55,7 +55,7 @@
       <dependency>
           <groupId>org.apache.httpcomponents</groupId>
           <artifactId>httpclient</artifactId>
-          <version>4.2</version>
+          <version>4.2.1</version>
       </dependency>
     <dependency>
         <groupId>log4j</groupId>
@@ -75,7 +75,7 @@
       <dependency>
           <groupId>org.dasein</groupId>
           <artifactId>dasein-cloud-test</artifactId>
-          <version>2012.09.5</version>
+          <version>2013.02.3</version>
           <scope>test</scope>
           <optional>false</optional>
       </dependency>
@@ -173,47 +173,47 @@
             <systemProperties>
                 <property>
                     <name>endpoint</name>
-                    <value>${org.dasein.cloud.rackspace.endpoint}</value>
+                    <value>${endpoint}</value>
                 </property>
                 <property>
                     <name>accountNumber</name>
-                    <value>${org.dasein.cloud.rackspace.accountNumber}</value>
+                    <value>${accountNumber}</value>
                 </property>
                 <property>
                     <name>apiSharedKey</name>
-                    <value>${org.dasein.cloud.rackspace.apiSharedKey}</value>
+                    <value>${apiSharedKey}</value>
                 </property>
                 <property>
                     <name>apiSecretKey</name>
-                    <value>${org.dasein.cloud.rackspace.apiSecretKey}</value>
+                    <value>${apiSecretKey}</value>
                 </property>
                 <property>
                     <name>cloudName</name>
-                    <value>${org.dasein.cloud.rackspace.cloudName}</value>
+                    <value>${cloudName}</value>
                 </property>
                 <property>
                     <name>providerName</name>
-                    <value>${org.dasein.cloud.rackspace.providerName}</value>
+                    <value>${providerName}</value>
                 </property>
                 <property>
                     <name>regionId</name>
-                    <value>${org.dasein.cloud.rackspace.regionId}</value>
+                    <value>${regionId}</value>
                 </property>
                 <property>
                     <name>test.region</name>
-                    <value>${org.dasein.cloud.rackspace.test.region}</value>
+                    <value>${test.region}</value>
                 </property>
                 <property>
                     <name>test.dataCenter</name>
-                    <value>${org.dasein.cloud.rackspace.test.dataCenter}</value>
+                    <value>${test.dataCenter}</value>
                 </property>
                 <property>
                     <name>test.machineImage</name>
-                    <value>${org.dasein.cloud.rackspace.test.machineImage}</value>
+                    <value>${test.machineImage}</value>
                 </property>
                 <property>
                     <name>test.product</name>
-                    <value>${org.dasein.cloud.rackspace.test.product}</value>
+                    <value>${test.product}</value>
                 </property>
             </systemProperties> 
           <includes>

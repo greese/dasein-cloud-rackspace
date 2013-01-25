@@ -34,6 +34,7 @@ import org.dasein.cloud.CloudErrorType;
 import org.dasein.cloud.CloudException;
 import org.dasein.cloud.InternalException;
 import org.dasein.cloud.OperationNotSupportedException;
+import org.dasein.cloud.ResourceStatus;
 import org.dasein.cloud.compute.VirtualMachine;
 import org.dasein.cloud.identity.ServiceAction;
 import org.dasein.cloud.network.IPVersion;
@@ -405,6 +406,16 @@ public class CloudLoadBalancers implements LoadBalancerSupport {
     @Override
     public String getProviderTermForLoadBalancer(Locale locale) {
         return "load balancer";
+    }
+
+    @Override
+    public Iterable<ResourceStatus> listLoadBalancerStatus() throws CloudException, InternalException {
+        ArrayList<ResourceStatus> status = new ArrayList<ResourceStatus>();
+
+        for( LoadBalancer lb : listLoadBalancers() ) {
+            status.add(new ResourceStatus(lb.getProviderLoadBalancerId(), lb.getCurrentState()));
+        }
+        return status;
     }
 
     static private transient Collection<LbAlgorithm> supportedAlgorithms;

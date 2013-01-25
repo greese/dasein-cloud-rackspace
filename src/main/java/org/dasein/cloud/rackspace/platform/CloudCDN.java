@@ -25,6 +25,7 @@ import java.util.Map;
 
 import org.dasein.cloud.CloudException;
 import org.dasein.cloud.InternalException;
+import org.dasein.cloud.ResourceStatus;
 import org.dasein.cloud.identity.ServiceAction;
 import org.dasein.cloud.platform.CDNSupport;
 import org.dasein.cloud.platform.Distribution;
@@ -167,6 +168,17 @@ public class CloudCDN implements CDNSupport {
             }
         }
         return distributions;
+    }
+
+    @Nonnull
+    @Override
+    public Iterable<ResourceStatus> listDistributionStatus() throws InternalException, CloudException {
+        ArrayList<ResourceStatus> status = new ArrayList<ResourceStatus>();
+
+        for( Distribution d : list() ) {
+            status.add(new ResourceStatus(d.getProviderDistributionId(), d.isDeployed()));
+        }
+        return status;
     }
 
     @Override
