@@ -33,24 +33,16 @@ import org.apache.log4j.Logger;
 import org.dasein.cloud.CloudErrorType;
 import org.dasein.cloud.CloudException;
 import org.dasein.cloud.InternalException;
-import org.dasein.cloud.OperationNotSupportedException;
-import org.dasein.cloud.ProviderContext;
 import org.dasein.cloud.Requirement;
-import org.dasein.cloud.ResourceStatus;
-import org.dasein.cloud.Tag;
+import org.dasein.cloud.compute.AbstractVMSupport;
 import org.dasein.cloud.compute.Architecture;
 import org.dasein.cloud.compute.ImageClass;
 import org.dasein.cloud.compute.MachineImage;
 import org.dasein.cloud.compute.Platform;
 import org.dasein.cloud.compute.VMLaunchOptions;
-import org.dasein.cloud.compute.VMScalingCapabilities;
-import org.dasein.cloud.compute.VMScalingOptions;
 import org.dasein.cloud.compute.VirtualMachine;
 import org.dasein.cloud.compute.VirtualMachineProduct;
-import org.dasein.cloud.compute.VirtualMachineSupport;
 import org.dasein.cloud.compute.VmState;
-import org.dasein.cloud.compute.VmStatistics;
-import org.dasein.cloud.dc.DataCenter;
 import org.dasein.cloud.identity.ServiceAction;
 import org.dasein.cloud.rackspace.RackspaceCloud;
 import org.dasein.cloud.rackspace.RackspaceException;
@@ -64,7 +56,7 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 
-public class CloudServers implements VirtualMachineSupport {
+public class CloudServers extends AbstractVMSupport {
     static private HashMap<String,Collection<VirtualMachineProduct>> cachedProducts = new HashMap<String,Collection<VirtualMachineProduct>>();
     
     static public final int NAME_LIMIT = 30;
@@ -72,46 +64,9 @@ public class CloudServers implements VirtualMachineSupport {
     
     private RackspaceCloud provider;
     
-    CloudServers(@Nonnull RackspaceCloud provider) { this.provider = provider; }
-
-    @Override
-    public VirtualMachine alterVirtualMachine(@Nonnull String vmId, @Nonnull VMScalingOptions options) throws InternalException, CloudException {
-        throw new OperationNotSupportedException("Not supported");
-    }
-
-    @Override
-    public @Nonnull VirtualMachine clone(@Nonnull String vmId, @Nullable String intoDcId, @Nonnull String name, @Nonnull String description, boolean powerOn, @Nullable String... firewallIds) throws InternalException, CloudException {
-        throw new OperationNotSupportedException("Rackspace foes not support the cloning of servers.");
-    }
-
-    @Override
-    public VMScalingCapabilities describeVerticalScalingCapabilities() throws CloudException, InternalException {
-        return null;
-    }
-
-    @Override
-    public void disableAnalytics(@Nonnull String vmId) throws InternalException, CloudException {
-        // NO-OP
-    }
-
-    @Override
-    public void enableAnalytics(@Nonnull String vmId) throws InternalException, CloudException {
-        // NO-OP
-    }
-
-    @Override
-    public @Nonnull String getConsoleOutput(@Nonnull String vmId) throws InternalException, CloudException {
-        return "";
-    }
-
-    @Override
-    public int getCostFactor(@Nonnull VmState state) throws InternalException, CloudException {
-        return 100;
-    }
-
-    @Override
-    public int getMaximumVirtualMachineCount() throws CloudException, InternalException {
-        return -2;
+    CloudServers(@Nonnull RackspaceCloud provider) {
+        super(provider);
+        this.provider = provider;
     }
 
     @Override
@@ -186,25 +141,10 @@ public class CloudServers implements VirtualMachineSupport {
         }
     }
 
-    @Override
-    public @Nullable VmStatistics getVMStatistics(@Nonnull String vmId, long from, long to) throws InternalException, CloudException {
-        return null;
-    }
-
-    @Override
-    public @Nonnull Iterable<VmStatistics> getVMStatisticsForPeriod(@Nonnull String vmId, long from, long to) throws InternalException, CloudException {
-        return Collections.emptyList();
-    }
-
     @Nonnull
     @Override
     public Requirement identifyImageRequirement(@Nonnull ImageClass cls) throws CloudException, InternalException {
         return (cls.equals(ImageClass.MACHINE) ? Requirement.REQUIRED : Requirement.NONE);
-    }
-
-    @Override
-    public @Nonnull Requirement identifyPasswordRequirement() throws CloudException, InternalException {
-        return Requirement.NONE;
     }
 
     @Nonnull
@@ -215,11 +155,6 @@ public class CloudServers implements VirtualMachineSupport {
 
     @Override
     public @Nonnull Requirement identifyRootVolumeRequirement() throws CloudException, InternalException {
-        return Requirement.NONE;
-    }
-
-    @Override
-    public @Nonnull Requirement identifyShellKeyRequirement() throws CloudException, InternalException {
         return Requirement.NONE;
     }
 
@@ -350,54 +285,6 @@ public class CloudServers implements VirtualMachineSupport {
     }
 
     @Override
-    public @Nonnull VirtualMachine launch(@Nonnull String fromMachineImageId, @Nonnull VirtualMachineProduct product, @Nullable String dataCenterId, @Nonnull String name, @Nonnull String description, @Nullable String withKeypairId, @Nullable String inVlanId, boolean withAnalytics, boolean asSandbox, @Nullable String... firewallIds) throws InternalException, CloudException {
-        return launch(fromMachineImageId, product, dataCenterId, name, description, withKeypairId, inVlanId, withAnalytics, asSandbox, firewallIds, new Tag[0]);
-    }
-
-    @Override
-    public @Nonnull VirtualMachine launch(@Nonnull String fromMachineImageId, @Nonnull VirtualMachineProduct product, @Nullable String dataCenterId, @Nonnull String name, @Nonnull String description, @Nullable String withKeypairId, @Nullable String inVlanId, boolean withAnalytics, boolean asSandbox, @Nullable String[] firewallIds, @Nullable Tag... tags) throws InternalException, CloudException {
-        ProviderContext ctx = provider.getContext();
-
-        if( ctx == null ) {
-            throw new CloudException("No context was provided for this request");
-        }
-        //noinspection ConstantConditions
-        if( description == null ) {
-            description = name;
-        }
-        if( dataCenterId == null ) {
-            for( DataCenter dc : provider.getDataCenterServices().listDataCenters(ctx.getRegionId()) ) {
-                if( dc != null ) {
-                    dataCenterId = dc.getProviderDataCenterId();
-                    break;
-                }
-            }
-        }
-        VMLaunchOptions options;
-
-        if( inVlanId == null ) {
-            //noinspection ConstantConditions
-            options = VMLaunchOptions.getInstance(product.getProviderProductId(), fromMachineImageId, name, description).inDataCenter(dataCenterId);
-        }
-        else {
-            //noinspection ConstantConditions
-            options = VMLaunchOptions.getInstance(product.getProviderProductId(), fromMachineImageId, name, description).inVlan(null, dataCenterId, inVlanId);
-        }
-        if( withKeypairId != null ) {
-            options = options.withBoostrapKey(withKeypairId);
-        }
-        if( tags != null ) {
-            for( Tag t : tags ) {
-                options = options.withMetaData(t.getKey(), t.getValue());
-            }
-        }
-        if( firewallIds != null ) {
-            options = options.behindFirewalls(firewallIds);
-        }
-        return launch(options);
-    }
-
-    @Override
     public @Nonnull Iterable<String> listFirewalls(@Nonnull String vmId) throws InternalException, CloudException {
         return Collections.emptyList();
     }
@@ -469,17 +356,6 @@ public class CloudServers implements VirtualMachineSupport {
         return architectures;
     }
 
-    @Nonnull
-    @Override
-    public Iterable<ResourceStatus> listVirtualMachineStatus() throws InternalException, CloudException {
-        ArrayList<ResourceStatus> status = new ArrayList<ResourceStatus>();
-
-        for( VirtualMachine vm : listVirtualMachines() ) {
-            status.add(new ResourceStatus(vm.getProviderVirtualMachineId(), vm.getCurrentState()));
-        }
-        return status;
-    }
-
     @Override
     public @Nonnull Iterable<VirtualMachine> listVirtualMachines() throws InternalException, CloudException {
         Logger std = RackspaceCloud.getLogger(CloudServers.class, "std");
@@ -529,11 +405,6 @@ public class CloudServers implements VirtualMachineSupport {
     }
 
     @Override
-    public void pause(@Nonnull String vmId) throws InternalException, CloudException {
-        throw new OperationNotSupportedException("Rackspace does not support pause/unpause.");
-    }
-
-    @Override
     public void reboot(@Nonnull String vmId) throws CloudException, InternalException {
         Logger logger = RackspaceCloud.getLogger(CloudServers.class, "std");
         
@@ -559,31 +430,6 @@ public class CloudServers implements VirtualMachineSupport {
     }
 
     @Override
-    public void resume(@Nonnull String vmId) throws CloudException, InternalException {
-        throw new OperationNotSupportedException("Rackspace does not support suspend/resume of servers.");
-    }
-
-    @Override
-    public void start(@Nonnull String vmId) throws InternalException, CloudException {
-        throw new OperationNotSupportedException("Rackspace does not support start/stop of servers.");
-    }
-
-    @Override
-    public void stop(@Nonnull String vmId) throws InternalException, CloudException {
-        stop(vmId, false);
-    }
-
-    @Override
-    public void stop(@Nonnull String vmId, boolean force) throws InternalException, CloudException {
-        throw new OperationNotSupportedException("Rackspace does not support start/stop of servers");
-    }
-
-    @Override
-    public boolean supportsAnalytics() throws CloudException, InternalException {
-        return false;
-    }
-
-    @Override
     public boolean supportsPauseUnpause(@Nonnull VirtualMachine vm) {
         return false;
     }
@@ -596,11 +442,6 @@ public class CloudServers implements VirtualMachineSupport {
     @Override
     public boolean supportsSuspendResume(@Nonnull VirtualMachine vm) {
         return false;
-    }
-
-    @Override
-    public void suspend(@Nonnull String vmId) throws CloudException, InternalException {
-        throw new OperationNotSupportedException("Rackspace does not support suspend/resume of servers.");
     }
 
     @Override
@@ -633,31 +474,6 @@ public class CloudServers implements VirtualMachineSupport {
                 std.trace("exit - " + CloudServers.class.getName() + ".terminate()");
             }
         }
-    }
-
-    @Override
-    public void unpause(@Nonnull String vmId) throws CloudException, InternalException {
-        throw new OperationNotSupportedException("Rackspace does not support pause/unpause.");
-    }
-
-    @Override
-    public void updateTags(@Nonnull String vmId, @Nonnull Tag... tags) throws CloudException, InternalException {
-        // NO-OP
-    }
-
-    @Override
-    public void updateTags(@Nonnull String[] vmIds, @Nonnull Tag... tags) throws CloudException, InternalException {
-        // NO-OP
-    }
-
-    @Override
-    public void removeTags(@Nonnull String vmId, @Nonnull Tag... tags) throws CloudException, InternalException {
-        // NO-OP
-    }
-
-    @Override
-    public void removeTags(@Nonnull String[] vmIds, @Nonnull Tag... tags) throws CloudException, InternalException {
-        // NO-OP
     }
 
     private @Nullable VirtualMachineProduct toProduct(@Nullable JSONObject json) throws JSONException, InternalException, CloudException {

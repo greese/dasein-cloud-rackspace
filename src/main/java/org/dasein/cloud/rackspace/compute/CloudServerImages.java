@@ -32,21 +32,18 @@ import org.dasein.cloud.AsynchronousTask;
 import org.dasein.cloud.CloudErrorType;
 import org.dasein.cloud.CloudException;
 import org.dasein.cloud.InternalException;
-import org.dasein.cloud.OperationNotSupportedException;
 import org.dasein.cloud.ProviderContext;
 import org.dasein.cloud.Requirement;
-import org.dasein.cloud.ResourceStatus;
-import org.dasein.cloud.Tag;
+import org.dasein.cloud.compute.AbstractImageSupport;
 import org.dasein.cloud.compute.Architecture;
 import org.dasein.cloud.compute.ImageClass;
 import org.dasein.cloud.compute.ImageCreateOptions;
+import org.dasein.cloud.compute.ImageFilterOptions;
 import org.dasein.cloud.compute.MachineImage;
 import org.dasein.cloud.compute.MachineImageFormat;
 import org.dasein.cloud.compute.MachineImageState;
-import org.dasein.cloud.compute.MachineImageSupport;
 import org.dasein.cloud.compute.MachineImageType;
 import org.dasein.cloud.compute.Platform;
-import org.dasein.cloud.compute.VirtualMachine;
 import org.dasein.cloud.identity.ServiceAction;
 import org.dasein.cloud.rackspace.RackspaceCloud;
 import org.dasein.cloud.rackspace.RackspaceException;
@@ -57,33 +54,16 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 
-public class CloudServerImages implements MachineImageSupport {
+public class CloudServerImages extends AbstractImageSupport {
     private RackspaceCloud provider;
     
-    CloudServerImages(RackspaceCloud provider) { this.provider = provider; }
-
-    @Override
-    public void addImageShare(@Nonnull String providerImageId, @Nonnull String accountNumber) throws CloudException, InternalException {
-        throw new OperationNotSupportedException("Not supported");
+    CloudServerImages(RackspaceCloud provider) {
+        super(provider);
+        this.provider = provider;
     }
 
     @Override
-    public void addPublicShare(@Nonnull String providerImageId) throws CloudException, InternalException {
-        throw new OperationNotSupportedException("Not supported");
-    }
-
-    @Nonnull
-    @Override
-    public String bundleVirtualMachine(@Nonnull String virtualMachineId, @Nonnull MachineImageFormat format, @Nonnull String bucket, @Nonnull String name) throws CloudException, InternalException {
-        throw new OperationNotSupportedException("Not supported");
-    }
-
-    @Override
-    public void bundleVirtualMachineAsync(@Nonnull String virtualMachineId, @Nonnull MachineImageFormat format, @Nonnull String bucket, @Nonnull String name, @Nonnull AsynchronousTask<String> trackingTask) throws CloudException, InternalException {
-        throw new OperationNotSupportedException("Not supported");
-    }
-
-    private @Nonnull MachineImage capture(@Nonnull ImageCreateOptions options, @Nullable AsynchronousTask<MachineImage> task) throws CloudException, InternalException {
+    protected @Nonnull MachineImage capture(@Nonnull ImageCreateOptions options, @Nullable AsynchronousTask<MachineImage> task) throws CloudException, InternalException {
         Logger logger = RackspaceCloud.getLogger(CloudServerImages.class, "std");
 
         if( logger.isTraceEnabled() ) {
@@ -142,34 +122,6 @@ public class CloudServerImages implements MachineImageSupport {
         }
     }
 
-    @Nonnull
-    @Override
-    public MachineImage captureImage(@Nonnull ImageCreateOptions options) throws CloudException, InternalException {
-        return capture(options, null);
-    }
-
-    @Override
-    public void captureImageAsync(final @Nonnull ImageCreateOptions options, final @Nonnull AsynchronousTask<MachineImage> taskTracker) throws CloudException, InternalException {
-        Thread t= new Thread() {
-            public void run() {
-                try {
-                    capture(options, taskTracker);
-                }
-                catch( Throwable t ) {
-                    taskTracker.complete(t);
-                }
-                finally {
-                    provider.release();
-                }
-            }
-        };
-        provider.hold();
-
-        t.setName("Image Capture: " + options.getVirtualMachineId());
-        t.setDaemon(true);
-        t.start();
-    }
-
     @Override
     public MachineImage getImage(@Nonnull String providerImageId) throws CloudException, InternalException {
         Logger logger = RackspaceCloud.getLogger(CloudServerImages.class, "std");
@@ -210,26 +162,9 @@ public class CloudServerImages implements MachineImageSupport {
         }
     }
 
-    @Override
-    @Deprecated
-    public @Nullable MachineImage getMachineImage(@Nonnull String machineImageId) throws CloudException, InternalException {
-        return getImage(machineImageId);
-    }
-
-    @Override
-    public @Nonnull String getProviderTermForImage(@Nonnull Locale locale) {
-        return "image";
-    }
-
     @Nonnull
     @Override
     public String getProviderTermForImage(@Nonnull Locale locale, @Nonnull ImageClass cls) {
-        return "image";
-    }
-
-    @Nonnull
-    @Override
-    public String getProviderTermForCustomImage(@Nonnull Locale locale, @Nonnull ImageClass cls) {
         return "image";
     }
 
@@ -245,38 +180,6 @@ public class CloudServerImages implements MachineImageSupport {
     }
 
     @Override
-    public @Nonnull AsynchronousTask<String> imageVirtualMachine(@Nonnull String vmId, @Nonnull String name, @Nonnull String description) throws CloudException, InternalException {
-        VirtualMachine vm = provider.getComputeServices().getVirtualMachineSupport().getVirtualMachine(vmId);
-
-        if( vm == null ) {
-            throw new CloudException("No such virtual machine: " + vmId);
-        }
-        final ImageCreateOptions options = ImageCreateOptions.getInstance(vm, name, description);
-        final AsynchronousTask<String> task = new AsynchronousTask<String>();
-
-        Thread t= new Thread() {
-            public void run() {
-                try {
-                    task.completeWithResult(capture(options, null).getProviderMachineImageId());
-                }
-                catch( Throwable t ) {
-                    task.complete(t);
-                }
-                finally {
-                    provider.release();
-                }
-            }
-        };
-        provider.hold();
-
-        t.setName("Image Capture: " + options.getVirtualMachineId());
-        t.setDaemon(true);
-        t.start();
-
-        return task;
-    }
-
-    @Override
     public boolean isImageSharedWithPublic(@Nonnull String machineImageId) throws CloudException, InternalException {
         return false;
     }
@@ -286,23 +189,8 @@ public class CloudServerImages implements MachineImageSupport {
         return (provider.isMyRegion() && provider.testContext() != null);
     }
 
-    @Nonnull
     @Override
-    public Iterable<ResourceStatus> listImageStatus(@Nonnull ImageClass cls) throws CloudException, InternalException {
-        ArrayList<ResourceStatus> status = new ArrayList<ResourceStatus>();
-
-        for( MachineImage img : listImages(cls) ) {
-            status.add(new ResourceStatus(img.getProviderMachineImageId(), img.getCurrentState()));
-        }
-        return status;
-    }
-
-    @Nonnull
-    @Override
-    public Iterable<MachineImage> listImages(@Nonnull ImageClass cls) throws CloudException, InternalException {
-        if( !cls.equals(ImageClass.MACHINE) ) {
-            return Collections.emptyList();
-        }
+    public @Nonnull Iterable<MachineImage> listImages(@Nullable ImageFilterOptions options) throws CloudException, InternalException {
         Logger logger = RackspaceCloud.getLogger(CloudServerImages.class, "std");
 
         if( logger.isTraceEnabled() ) {
@@ -310,6 +198,21 @@ public class CloudServerImages implements MachineImageSupport {
         }
         try {
             if( !provider.isMyRegion() ) {
+                return Collections.emptyList();
+            }
+            ImageClass cls = (options == null ? null : options.getImageClass());
+
+            if( cls != null && !cls.equals(ImageClass.MACHINE) ) {
+                return Collections.emptyList();
+            }
+            ProviderContext ctx = getProvider().getContext();
+
+            if( ctx == null ) {
+                throw new CloudException("No context was specified for this request");
+            }
+            String account = (options == null ? null : options.getAccountNumber());
+
+            if( account != null && !account.equals(ctx.getAccountNumber()) ) {
                 return Collections.emptyList();
             }
             RackspaceMethod method = new RackspaceMethod(provider);
@@ -344,30 +247,6 @@ public class CloudServerImages implements MachineImageSupport {
         }
     }
 
-    @Nonnull
-    @Override
-    public Iterable<MachineImage> listImages(@Nonnull ImageClass cls, @Nonnull String ownedBy) throws CloudException, InternalException {
-        ProviderContext ctx = provider.getContext();
-
-        if( ctx == null ) {
-            throw new CloudException("No context");
-        }
-        if( !ownedBy.equals(ctx.getAccountNumber()) ) {
-            return Collections.emptyList();
-        }
-        return listImages(cls);
-    }
-
-    @Override
-    public @Nonnull Iterable<MachineImage> listMachineImages() throws CloudException, InternalException {
-        return listImages(ImageClass.MACHINE);
-    }
-
-    @Override
-    public @Nonnull Iterable<MachineImage> listMachineImagesOwnedBy(String accountId) throws CloudException, InternalException {
-        return listMachineImages();
-    }
-
     @Override
     public @Nonnull Iterable<MachineImageFormat> listSupportedFormats() throws CloudException, InternalException {
         return Collections.emptyList();
@@ -396,20 +275,9 @@ public class CloudServerImages implements MachineImageSupport {
         return Collections.singleton(MachineImageType.VOLUME);
     }
 
-    @Nonnull
-    @Override
-    public MachineImage registerImageBundle(@Nonnull ImageCreateOptions options) throws CloudException, InternalException {
-        throw new OperationNotSupportedException("Not supported");
-    }
-
     @Override
     public @Nonnull String[] mapServiceAction(@Nonnull ServiceAction action) {
         return new String[0];
-    }
-
-    @Override
-    public void remove(@Nonnull String machineImageId) throws CloudException, InternalException {
-        remove(machineImageId, false);
     }
 
     @Override
@@ -442,21 +310,6 @@ public class CloudServerImages implements MachineImageSupport {
                 logger.trace("exit - " + CloudServerImages.class.getName() + ".remove()");
             }
         }
-    }
-
-    @Override
-    public void removeAllImageShares(@Nonnull String providerImageId) throws CloudException, InternalException {
-        // NO-OP
-    }
-
-    @Override
-    public void removeImageShare(@Nonnull String providerImageId, @Nonnull String accountNumber) throws CloudException, InternalException {
-        throw new OperationNotSupportedException("Not supported");
-    }
-
-    @Override
-    public void removePublicShare(@Nonnull String providerImageId) throws CloudException, InternalException {
-        throw new OperationNotSupportedException("Not supported");
     }
 
     @Override
@@ -527,11 +380,6 @@ public class CloudServerImages implements MachineImageSupport {
     }
 
     @Override
-    public void shareMachineImage(@Nonnull String machineImageId, @Nullable String withAccountId, boolean allow) throws CloudException, InternalException {
-        throw new OperationNotSupportedException("Rackspace does not support image sharing");
-    }
-
-    @Override
     public boolean supportsCustomImages() {
         return true;
     }
@@ -559,26 +407,6 @@ public class CloudServerImages implements MachineImageSupport {
     @Override
     public boolean supportsPublicLibrary(@Nonnull ImageClass cls) throws CloudException, InternalException {
         return false;
-    }
-
-    @Override
-    public void updateTags(@Nonnull String vmId, @Nonnull Tag... tags) throws CloudException, InternalException {
-        // NO-OP
-    }
-
-    @Override
-    public void updateTags(@Nonnull String[] vmIds, @Nonnull Tag... tags) throws CloudException, InternalException {
-        // NO-OP
-    }
-
-    @Override
-    public void removeTags(@Nonnull String vmId, @Nonnull Tag... tags) throws CloudException, InternalException {
-        // NO-OP
-    }
-
-    @Override
-    public void removeTags(@Nonnull String[] vmIds, @Nonnull Tag... tags) throws CloudException, InternalException {
-        // NO-OP
     }
     
     public @Nullable MachineImage toImage(@Nullable JSONObject json) throws JSONException {
