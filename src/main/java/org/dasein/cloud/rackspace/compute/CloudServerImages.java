@@ -44,7 +44,6 @@ import org.dasein.cloud.compute.MachineImageFormat;
 import org.dasein.cloud.compute.MachineImageState;
 import org.dasein.cloud.compute.MachineImageType;
 import org.dasein.cloud.compute.Platform;
-import org.dasein.cloud.identity.ServiceAction;
 import org.dasein.cloud.rackspace.RackspaceCloud;
 import org.dasein.cloud.rackspace.RackspaceException;
 import org.dasein.cloud.rackspace.RackspaceMethod;
@@ -200,11 +199,6 @@ public class CloudServerImages extends AbstractImageSupport {
             if( !provider.isMyRegion() ) {
                 return Collections.emptyList();
             }
-            ImageClass cls = (options == null ? null : options.getImageClass());
-
-            if( cls != null && !cls.equals(ImageClass.MACHINE) ) {
-                return Collections.emptyList();
-            }
             ProviderContext ctx = getProvider().getContext();
 
             if( ctx == null ) {
@@ -227,7 +221,7 @@ public class CloudServerImages extends AbstractImageSupport {
                         JSONObject image = list.getJSONObject(i);
                         MachineImage img = toImage(image);
 
-                        if( img != null ) {
+                        if( img != null && (options == null || options.matches(img)) ) {
                             images.add(img);
                         }
 
@@ -276,11 +270,6 @@ public class CloudServerImages extends AbstractImageSupport {
     }
 
     @Override
-    public @Nonnull String[] mapServiceAction(@Nonnull ServiceAction action) {
-        return new String[0];
-    }
-
-    @Override
     public void remove(@Nonnull String providerImageId, boolean checkState) throws CloudException, InternalException {
         Logger logger = RackspaceCloud.getLogger(CloudServerImages.class, "std");
 
@@ -315,62 +304,6 @@ public class CloudServerImages extends AbstractImageSupport {
     @Override
     public @Nonnull Iterable<MachineImage> searchMachineImages(@Nullable String keyword, @Nullable Platform platform, @Nullable Architecture architecture) throws CloudException, InternalException {
         return searchImages(null, keyword, platform, architecture, ImageClass.MACHINE);
-    }
-
-    @Nonnull
-    @Override
-    public Iterable<MachineImage> searchImages(@Nullable String accountNumber, @Nullable String keyword, @Nullable Platform platform, @Nullable Architecture architecture, @Nullable ImageClass... imageClasses) throws CloudException, InternalException {
-        if( !provider.isMyRegion()  ) {
-            return Collections.emptyList();
-        }
-        ProviderContext ctx = provider.getContext();
-
-        if( ctx == null ) {
-            throw new CloudException("No context");
-        }
-        if( accountNumber != null && !accountNumber.equals(ctx.getAccountNumber()) ) {
-            return Collections.emptyList();
-        }
-        ArrayList<MachineImage> images = new ArrayList<MachineImage>();
-
-        for( MachineImage img : listMachineImages() ) {
-            if( architecture != null ) {
-                if( !architecture.equals(img.getArchitecture()) ) {
-                    continue;
-                }
-            }
-            if( platform != null && !platform.equals(Platform.UNKNOWN) ) {
-                Platform p = img.getPlatform();
-
-                if( p.equals(Platform.UNKNOWN) ) {
-                    continue;
-                }
-                else if( platform.isWindows() ) {
-                    if( !p.isWindows() ) {
-                        continue;
-                    }
-                }
-                else if( platform.equals(Platform.UNIX) ) {
-                    if( !p.isUnix() ) {
-                        continue;
-                    }
-                }
-                else if( !platform.equals(p) ) {
-                    continue;
-                }
-            }
-            if( keyword != null ) {
-                if( !img.getName().contains(keyword) ) {
-                    if( !img.getDescription().contains(keyword) ) {
-                        if( !img.getProviderMachineImageId().contains(keyword) ) {
-                            continue;
-                        }
-                    }
-                }
-            }
-            images.add(img);
-        }
-        return images;
     }
 
     @Nonnull
