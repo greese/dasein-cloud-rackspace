@@ -44,8 +44,15 @@
         <version>2013.04-SNAPSHOT</version>
         <scope>compile</scope>
         <optional>false</optional>
-    </dependency>   
-    <dependency>
+    </dependency>
+      <dependency>
+          <groupId>org.dasein</groupId>
+          <artifactId>dasein-cloud-openstack</artifactId>
+          <version>2013.04-SNAPSHOT</version>
+          <scope>compile</scope>
+          <optional>false</optional>
+      </dependency>
+      <dependency>
         <groupId>org.dasein</groupId>
         <artifactId>dasein-util</artifactId>
         <version>2013.02</version>
@@ -180,6 +187,10 @@
         <configuration>
             <systemProperties>
                 <property>
+                    <name>providerClass</name>
+                    <value>${providerClass}</value>
+                </property>
+                <property>
                     <name>endpoint</name>
                     <value>${endpoint}</value>
                 </property>
@@ -196,6 +207,14 @@
                     <value>${apiSecretKey}</value>
                 </property>
                 <property>
+                    <name>accessPublic</name>
+                    <value>${apiSharedKey}</value>
+                </property>
+                <property>
+                    <name>accessPrivate</name>
+                    <value>${apiSecretKey}</value>
+                </property>
+                <property>
                     <name>cloudName</name>
                     <value>${cloudName}</value>
                 </property>
@@ -209,7 +228,7 @@
                 </property>
                 <property>
                     <name>test.region</name>
-                    <value>${test.region}</value>
+                    <value>${regionId}</value>
                 </property>
                 <property>
                     <name>test.dataCenter</name>
@@ -225,7 +244,7 @@
                 </property>
             </systemProperties> 
           <includes>
-            <include>**/RackspaceTestSuite.java</include>
+            <include>**/TestSuite.java</include>
           </includes>
         </configuration>
       </plugin> 

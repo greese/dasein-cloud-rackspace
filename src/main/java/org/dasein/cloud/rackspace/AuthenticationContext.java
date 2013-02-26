@@ -89,16 +89,16 @@ public class AuthenticationContext {
             String tmp = storageUrl.toLowerCase();
             
             if( tmp.contains(".dfw") ) {
-                myRegion = "DFW";
+                myRegion = "xDFW";
             }
             else if( tmp.contains(".ord") ) {
-                myRegion = "ORD";
+                myRegion = "xORD";
             }
             else if( tmp.contains(".lon") ) {
-                myRegion = "LON";
+                myRegion = "xLON";
             }
             else {
-                myRegion = "ORD";
+                myRegion = "xORD";
             }
         }
         this.storageUrl = storageUrl;

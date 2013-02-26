@@ -94,30 +94,30 @@ public class RackspaceLocationServices implements DataCenterServices {
             Region region = null;
             
             if( provider.isUK() ) {
-                if( providerRegionId.equals("LON") ) {
+                if( providerRegionId.equals("xLON") ) {
                     region = new Region();                
                     region.setActive(true);
                     region.setAvailable(true);
                     region.setJurisdiction("EU");
-                    region.setName("London");
+                    region.setName("London/Legacy");
                     region.setProviderRegionId(providerRegionId);
                 }
             }
             else {
-                if( providerRegionId.equals("ORD") ) {
+                if( providerRegionId.equals("xORD") ) {
                     region = new Region();                
                     region.setActive(true);
                     region.setAvailable(true);
                     region.setJurisdiction("US");
-                    region.setName("Chicago");
+                    region.setName("Chicago/Legacy");
                     region.setProviderRegionId(providerRegionId);
                 }
-                else if( providerRegionId.equals("DFW") ) {
+                else if( providerRegionId.equals("xDFW") ) {
                     region = new Region();                
                     region.setActive(true);
                     region.setAvailable(true);
                     region.setJurisdiction("US");
-                    region.setName("Dallas");
+                    region.setName("Dallas/Legacy");
                     region.setProviderRegionId(providerRegionId);
                 }
             }
@@ -161,13 +161,13 @@ public class RackspaceLocationServices implements DataCenterServices {
         }
         try {
             if( provider.isUK() ) {
-                return Collections.singletonList(getRegion("LON"));
+                return Collections.singletonList(getRegion("xLON"));
             }
             else {
                 ArrayList<Region> regions = new ArrayList<Region>();
                 
-                regions.add(getRegion("ORD"));
-                regions.add(getRegion("DFW"));
+                regions.add(getRegion("xORD"));
+                regions.add(getRegion("xDFW"));
                 return regions;
             }
         }

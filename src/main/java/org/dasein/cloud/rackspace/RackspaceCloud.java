@@ -141,7 +141,7 @@ public class RackspaceCloud extends AbstractCloud {
         }
         boolean uk = isUK();
         
-        if( uk && "LON".equals(ctx.getRegionId()) ) {
+        if( uk && "xLON".equals(ctx.getRegionId()) ) {
             return true;
         }
         else if( !uk ) {
